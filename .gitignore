@@ -15,6 +15,9 @@ config.ini
 .env
 .phoenix/
 
+#internal documentation
+docs/internal-docs
+
 # Tooling
 .pytest_cache/
 .mypy_cache/
