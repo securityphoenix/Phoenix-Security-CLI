@@ -22,11 +22,18 @@ The findings resource is **read-only** (`POST /v1/findings` search,
 - override severity/risk at the platform level
 - add comments or triage notes
 
-**Workaround**: the only write path is `POST /v1/import/assets`.
-`phx findings enrich` re-imports a finding with `importType=merge` to update
-scanner-provided fields (severity, description, remedy, location, CVEs,
-CWEs, tags, `details` JSON). Omitting a finding from a `new`/`merge` import
-auto-closes it. True platform overrides remain UI-only.
+**Workarounds implemented by the CLI/MCP** (all built on
+`POST /v1/import/assets`, the only write path):
+- `phx findings add` / `phoenix_add_finding` — add a new finding
+  (`delta`, never touches other findings).
+- `phx findings close` / `phoenix_close_finding` — close a finding by
+  re-importing its asset within the owning assessment via `merge`,
+  omitting the target (supports `--dry-run`). Assessment-scoped and
+  best-effort by nature.
+- `phx findings enrich` / `phoenix_enrich_finding` — update severity,
+  description, remedy, location, CVEs, CWEs, tags, `details` JSON.
+
+Risk-accept, false-positive and platform severity overrides remain UI-only.
 
 **Should exist**: `PATCH /v1/findings/<finding-id>` accepting
 `status`, `severityOverride`, `riskAccepted`, `falsePositive`, `comment`.
@@ -42,12 +49,25 @@ auto-closes it. True platform overrides remain UI-only.
 - **Tags**: can be added (`PUT /v1/assets/<id>/tags`) but **not removed** —
   unlike application and component tags.
 
-**Workaround**: `phx assets create` / `phx assets enrich` wrap the import
-endpoint (empty `findings` array, `merge`); tag additions use the direct
-endpoint; removal and deletion are UI-only.
+**Workaround**: `phx assets create` / `update` / `enrich` wrap the import
+endpoint (empty `findings` array, `merge`) — additive edits only; tag
+additions use the direct endpoint; attribute removal, identity changes and
+deletion are UI-only.
 
 **Should exist**: `POST /v1/assets` (create), `PATCH /v1/assets/<id>`,
 `DELETE /v1/assets/<id>`, `PATCH /v1/assets/<id>/tags` (remove).
+
+## Required endpoints (formal API wishlist)
+
+The machine-readable registry behind this document lives in
+`phoenix_cli/gaps.py` (`REQUIRED_ENDPOINTS`) and is surfaced by
+**`phx gaps --required`** and the MCP `phoenix_api_gaps` tool
+(`requiredEndpoints`). Current list: `PATCH /v1/findings/<id>` (status/
+override/risk-accept/false-positive), `POST /v1/findings/<id>/comments`,
+`POST /v1/assets` (direct create), `PATCH /v1/assets/<id>`,
+`DELETE /v1/assets/<id>`, `PATCH /v1/assets/<id>/tags` (remove),
+`DELETE /v1/applications/<id>`, `GET /v1/scanners`,
+`GET /v1/import/requests/<id>` (+ webhooks).
 
 ## Medium-impact gaps
 

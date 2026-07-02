@@ -45,13 +45,20 @@ def cli(ctx, **options):
 
 
 @cli.command()
+@click.option("--required", is_flag=True,
+              help="Show the endpoints the Phoenix API should add "
+                   "(the formal wishlist behind the gaps).")
 @pass_state
 @run
-def gaps(state):
+def gaps(state, required):
     """Show operations NOT supported by Phoenix API v1.27 (and workarounds)."""
-    from phoenix_cli.gaps import as_rows
-    state.emit(as_rows(), columns=["area", "operation", "severity", "gap",
-                                   "workaround"])
+    from phoenix_cli.gaps import as_rows, required_endpoint_rows
+    if required:
+        state.emit(required_endpoint_rows(),
+                   columns=["method", "path", "purpose", "workaround today"])
+    else:
+        state.emit(as_rows(), columns=["area", "operation", "severity", "gap",
+                                       "workaround"])
 
 
 @cli.command()

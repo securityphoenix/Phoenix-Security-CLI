@@ -110,6 +110,78 @@ def get(state, finding_id):
 @click.option("--asset-type", required=True, type=click.Choice(ASSET_TYPES),
               help="Type of the asset carrying the finding.")
 @click.option("--asset-attr", "asset_attrs", multiple=True, required=True,
+              help="Asset matching attributes key=value (repeatable). The "
+                   "asset is created if it does not exist.")
+@click.option("--name", required=True, help="Finding name.")
+@click.option("--description", required=True)
+@click.option("--remedy", required=True)
+@click.option("--severity", required=True, help='"1.0"–"10.0"')
+@click.option("--location", help="Source file / asset location.")
+@click.option("--cve", "cves", multiple=True, help="Reference ID (repeatable).")
+@click.option("--cwe", "cwes", multiple=True, help="CWE-xxxx (repeatable).")
+@click.option("--tag", "tags", multiple=True, help="Tag key:value (repeatable).")
+@click.option("--details", help="Extra details JSON (inline or @file.json).")
+@click.option("--assessment", help="Assessment name (default: CLI Finding "
+                                   "Additions).")
+@pass_state
+@run
+def add(state, asset_type, asset_attrs, name, description, remedy, severity,
+        location, cves, cwes, tags, details, assessment):
+    """Add a NEW vulnerability/finding to an asset (import delta — never
+    closes or alters other findings)."""
+    finding = {
+        "name": name,
+        "description": description,
+        "remedy": remedy,
+        "severity": severity,
+        "location": location,
+        "referenceIds": list(cves) or None,
+        "cwes": list(cwes) or None,
+        "tags": list(tags) or None,
+        "details": load_json_arg(details, "details"),
+    }
+    result = state.client.add_finding(
+        asset_type=asset_type,
+        asset_attributes=parse_kv_pairs(asset_attrs, "asset-attr"),
+        finding={k: v for k, v in finding.items() if v is not None},
+        assessment_name=assessment,
+    )
+    state.emit(result)
+
+
+@findings.command()
+@click.argument("finding_id")
+@click.option("--assessment", required=True,
+              help="Assessment that owns the finding (closure is "
+                   "assessment-scoped in Phoenix).")
+@click.option("--dry-run", is_flag=True,
+              help="Show the merge payload without importing.")
+@click.option("--yes", is_flag=True, help="Skip confirmation.")
+@pass_state
+@run
+def close(state, finding_id, assessment, dry_run, yes):
+    """Close a finding (workaround — no direct close endpoint in v1.27).
+
+    Re-imports the finding's asset within the SAME assessment via merge,
+    omitting this finding: Phoenix then closes it. The asset's other OPEN
+    findings are re-sent so they stay open. See `phx gaps --required`.
+    """
+    if dry_run:
+        state.emit(state.client.close_finding(finding_id, assessment,
+                                              dry_run=True))
+        return
+    if not yes:
+        click.confirm(
+            f"Close finding {finding_id} by re-importing its asset into "
+            f"assessment '{assessment}' (merge, omitting this finding)?",
+            abort=True)
+    state.emit(state.client.close_finding(finding_id, assessment))
+
+
+@findings.command()
+@click.option("--asset-type", required=True, type=click.Choice(ASSET_TYPES),
+              help="Type of the asset carrying the finding.")
+@click.option("--asset-attr", "asset_attrs", multiple=True, required=True,
               help="Asset matching attributes key=value (repeatable).")
 @click.option("--name", required=True, help="Finding name (as imported).")
 @click.option("--description", required=True)

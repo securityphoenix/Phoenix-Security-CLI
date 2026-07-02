@@ -16,8 +16,8 @@ phx findings list --status OPEN --severity-from 700 -o json
 | Area | Commands | Coverage |
 |------|----------|----------|
 | Auth | `phx auth test`, `phx auth token` | Token flow (Basic → Bearer) |
-| Assets | `phx assets list/get/tag/create/enrich` | Search, tagging + creation & enrichment via the import pipeline |
-| Findings | `phx findings list/get/enrich` (alias `phx vulns`) | Every v1.27 search filter; enrichment via import merge |
+| Assets | `phx assets list/get/tag/create/update/enrich` | Search, tagging + creation & (additive) editing via the import pipeline |
+| Findings | `phx findings list/get/add/close/enrich` (alias `phx vulns`) | Every v1.27 search filter; add (delta), close (merge workaround) and enrich |
 | Import | `phx import file/status/template/types` | Bulk asset+finding imports (`new`/`merge`/`delta`) |
 | Applications & Environments | `phx apps …`, `phx envs …` | List, posture, create, update, tags, users, deploy links, repo rules |
 | Components & Services | `phx components …`, `phx services …` | Full CRUD, posture, tags, deploy links, asset-association rules |
@@ -101,6 +101,14 @@ phx assets create --type INFRA --attr ip=10.1.2.3 --attr hostname=web-01 \
 phx assets enrich --type INFRA --attr ip=10.1.2.3 --attr hostname=web-01 \
     --attr os="Ubuntu 22.04" --tag team:platform
 
+# Add a brand-new vulnerability to an asset (delta — never closes others)
+phx findings add --asset-type CONTAINER --asset-attr dockerfile=myorg/api:1.4 \
+    --name "Hardcoded credential in entrypoint" --description "..." \
+    --remedy "rotate + remove" --severity 8.5 --cwe CWE-798
+
+# Close a finding (workaround: merge re-import omitting it; see phx gaps --required)
+phx findings close <finding-id> --assessment "Nightly Trivy" --dry-run
+
 # Enrich a finding (the only API write path — import merge)
 phx findings enrich --asset-type CONTAINER --asset-attr dockerfile=myorg/api:1.4 \
     --name "CVE-2024-0001 in libssl" --description "..." --remedy "upgrade" \
@@ -138,7 +146,9 @@ explanation instead of failing mysteriously:
 - `phx assets delete` / `remove-tags` — no asset delete or tag-removal endpoint
 - `phx apps delete`, `phx teams delete`, `phx users delete` — not exposed by the API
 
-Run **`phx gaps`** for the full, always-current table with workarounds, or read
+Run **`phx gaps`** for the full, always-current table with workarounds, and
+**`phx gaps --required`** for the endpoints the API should add
+(`PATCH/DELETE /v1/assets`, `PATCH /v1/findings`, …). Details:
 [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md).
 
 ## Python library

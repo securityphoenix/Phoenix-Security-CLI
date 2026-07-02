@@ -154,6 +154,70 @@ def test_finding_search_body(client):
                         "severityScoreFrom": "700"}
 
 
+@responses.activate
+def test_add_finding_uses_delta(client):
+    _mock_token(responses)
+    captured = {}
+
+    def _capture(request):
+        captured.update(json.loads(request.body))
+        return (200, {}, "")
+
+    responses.add_callback(responses.POST, f"{BASE}/v1/import/assets",
+                           callback=_capture)
+    client.add_finding("CONTAINER", {"dockerfile": "org/api:1.0"},
+                       {"name": "F1", "description": "d", "remedy": "r",
+                        "severity": "9.0"})
+    assert captured["importType"] == "delta"          # never closes others
+    assert captured["assets"][0]["findings"][0]["name"] == "F1"
+
+
+@responses.activate
+def test_close_finding_rebuilds_merge_payload(client):
+    _mock_token(responses)
+    responses.get(f"{BASE}/v1/findings/f-target", json={
+        "id": "f-target", "status": "OPEN", "assetId": "a-1",
+        "severityScore": 800,
+        "data": [{"name": "Target", "description": "d", "remedy": "r"}]})
+    responses.get(f"{BASE}/v1/assets/a-1", json={
+        "id": "a-1", "type": "INFRA",
+        "data": [{"source": "s1",
+                  "attributes": {"ip": "10.0.0.1", "hostname": "h1"}}]})
+    responses.post(f"{BASE}/v1/findings", json={"content": [
+        {"id": "f-target", "status": "OPEN", "severityScore": 800,
+         "data": [{"name": "Target", "description": "d", "remedy": "r"}]},
+        {"id": "f-keep", "status": "OPEN", "severityScore": 500,
+         "location": "loc",
+         "data": [{"name": "Keep", "description": "kd", "remedy": "kr",
+                   "cve": "CVE-2024-1"}]},
+    ], "last": True})
+    result = client.close_finding("f-target", "Assessment-X", dry_run=True)
+    payload = result["payload"]
+    assert payload["importType"] == "merge"
+    assert payload["assessment"]["name"] == "Assessment-X"
+    kept = payload["assets"][0]["findings"]
+    assert [f["name"] for f in kept] == ["Keep"]      # target omitted
+    assert kept[0]["severity"] == "5.0"               # 500/100 scale mapping
+    assert kept[0]["referenceIds"] == ["CVE-2024-1"]
+    assert payload["assets"][0]["attributes"]["ip"] == "10.0.0.1"
+
+
+def test_new_commands_help():
+    runner = CliRunner()
+    for args in (["findings", "add", "--help"],
+                 ["findings", "close", "--help"],
+                 ["assets", "update", "--help"],
+                 ["gaps", "--required"]):
+        assert runner.invoke(cli, args).exit_code == 0
+
+
+def test_required_endpoints_listed():
+    result = CliRunner().invoke(cli, ["gaps", "--required"])
+    assert "PATCH" in result.output
+    assert "/v1/findings/<finding-id>" in result.output
+    assert "DELETE" in result.output
+
+
 def test_gap_stubs_raise(client):
     for call in (lambda: client.delete_asset("x"),
                  lambda: client.update_finding_status("x", "CLOSED"),

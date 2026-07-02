@@ -152,11 +152,44 @@ def enrich(state, asset_type, attrs, tags, software, assessment):
 
 
 @assets.command()
+@click.option("--type", "asset_type", required=True,
+              type=click.Choice(ASSET_TYPES))
+@click.option("--attr", "attrs", multiple=True, required=True,
+              help="Matching identity + attributes to add/update, key=value "
+                   "(repeatable).")
+@click.option("--tag", "tags", multiple=True, help="Tags to add (repeatable).")
+@click.option("--software", "software", multiple=True,
+              help="Installed software vendor:name:version[:cpe] (repeatable).")
+@click.option("--assessment", help="Assessment name for the merge import.")
+@pass_state
+@run
+def update(state, asset_type, attrs, tags, software, assessment):
+    """PARTIALLY edit an asset (add/update attributes, tags, software).
+
+    Additive-only: removing attributes/tags or changing the matching
+    identity needs PATCH /v1/assets/<id>, which the API lacks — see
+    `phx gaps --required`.
+    """
+    result = state.client.update_asset(
+        asset_type=asset_type,
+        attributes=parse_kv_pairs(attrs, "attr"),
+        tags=list(tags) or None,
+        installed_software=_software(software) or None,
+        assessment_name=assessment,
+    )
+    state.emit(result)
+
+
+@assets.command()
 @click.argument("asset_id", required=False)
 @pass_state
 @run
 def delete(state, asset_id):
-    """[NOT SUPPORTED] Delete an asset — flagged API gap."""
+    """[NOT SUPPORTED] Delete an asset — flagged API gap.
+
+    A DELETE /v1/assets/<id> endpoint is on the required list:
+    `phx gaps --required`.
+    """
     state.client.delete_asset(asset_id)
 
 

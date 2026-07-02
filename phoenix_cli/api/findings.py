@@ -11,7 +11,29 @@ See docs/GAP_ANALYSIS.md.
 """
 
 from phoenix_cli.api.common import drop_none, parse_tags
-from phoenix_cli.errors import PhoenixNotSupportedError
+from phoenix_cli.errors import PhoenixConfigError, PhoenixNotSupportedError
+
+
+def _finding_to_import(finding):
+    """Convert a search/get finding object back into import format
+    (best effort — used when rebuilding an asset report to close one
+    finding via merge semantics)."""
+    data = (finding.get("data") or [{}])[0]
+    severity_score = finding.get("severityScore") or 0
+    severity = max(1.0, min(10.0, round(float(severity_score) / 100.0, 1)))
+    reference_ids = [d.get("cve") for d in (finding.get("data") or [])
+                     if d.get("cve")]
+    tags = [{k: v for k, v in t.items() if k in ("key", "value") and v}
+            for t in (finding.get("tags") or []) if t.get("value")]
+    return drop_none({
+        "name": data.get("name"),
+        "description": data.get("description") or data.get("name"),
+        "remedy": data.get("remedy") or "See original finding",
+        "severity": str(severity),
+        "location": finding.get("location"),
+        "referenceIds": reference_ids or None,
+        "tags": tags or None,
+    })
 
 FINDING_TYPES = ("WEB", "CLOUD", "FOSS", "SAST", "CONTAINER", "INFRA")
 FINDING_STATUSES = ("OPEN", "CLOSED")
@@ -68,6 +90,94 @@ class FindingsAPI:
     def get_finding(self, finding_id):
         """Get one finding by its Phoenix ID."""
         return self.transport.request("GET", f"/v1/findings/{finding_id}")
+
+    # -- write operations (via the import pipeline) ---------------------------
+
+    def add_finding(self, asset_type, asset_attributes, finding,
+                    assessment_name=None):
+        """Add a NEW vulnerability/finding to an asset.
+
+        Uses importType='delta' — adds/updates only what is in the payload
+        and never closes other findings. The target asset is matched by
+        `asset_attributes` (created if absent). `finding` requires name,
+        description, remedy, severity ("1.0"-"10.0"); optional location,
+        referenceIds, cwes, details, tags.
+        """
+        finding = dict(finding)
+        if finding.get("tags"):
+            finding["tags"] = parse_tags(finding["tags"])
+        return self.import_assets(
+            import_type="delta",
+            assessment_name=assessment_name or "CLI Finding Additions",
+            asset_type=asset_type,
+            assets=[{
+                "attributes": asset_attributes,
+                "findings": [drop_none(finding)],
+            }],
+        )
+
+    def close_finding(self, finding_id, assessment_name, dry_run=False):
+        """Close a finding via the only mechanism API v1.27 offers:
+        re-import the asset within the SAME assessment with importType=
+        'merge', omitting the target finding — Phoenix closes findings
+        absent from a merge report.
+
+        assessment_name MUST be the assessment that owns the finding
+        (closure is assessment-scoped). dry_run=True returns the payload
+        that would be sent without importing.
+
+        Returns a summary dict. Raises PhoenixNotSupportedError context via
+        docs — a direct close endpoint does not exist (see gaps registry).
+        """
+        finding = self.get_finding(finding_id)
+        if str(finding.get("status", "")).upper() == "CLOSED":
+            return {"status": "already-closed", "findingId": finding_id}
+        asset_id = finding.get("assetId")
+        if not asset_id:
+            raise PhoenixConfigError(
+                f"Finding {finding_id} carries no assetId; cannot rebuild "
+                "the asset report to close it.")
+        asset = self.get_asset(asset_id)
+        attributes = {}
+        for entry in asset.get("data") or []:
+            for key, value in (entry.get("attributes") or {}).items():
+                attributes.setdefault(key, value)
+        if not attributes:
+            raise PhoenixConfigError(
+                f"Asset {asset_id} exposes no attributes; cannot rebuild "
+                "its import payload.")
+        siblings = [
+            f for f in self.search_findings(asset_id=asset_id,
+                                            status=["OPEN"])
+            if f.get("id") != finding_id
+        ]
+        kept = [_finding_to_import(f) for f in siblings]
+        payload_assets = [{"attributes": attributes, "findings": kept}]
+        summary = {
+            "findingId": finding_id,
+            "assetId": asset_id,
+            "assessment": assessment_name,
+            "keptOpenFindings": len(kept),
+            "mechanism": "merge re-import omitting the finding "
+                         "(no direct close endpoint in API v1.27)",
+        }
+        if dry_run:
+            summary["payload"] = {
+                "importType": "merge",
+                "assessment": {"assetType": asset.get("type"),
+                               "name": assessment_name},
+                "assets": payload_assets,
+            }
+            summary["status"] = "dry-run"
+            return summary
+        self.import_assets(
+            import_type="merge",
+            assessment_name=assessment_name,
+            asset_type=asset.get("type"),
+            assets=payload_assets,
+        )
+        summary["status"] = "close-requested"
+        return summary
 
     # -- enrichment ----------------------------------------------------------
 

@@ -88,6 +88,22 @@ class AssetsAPI:
             import_type="merge",
         )
 
+    def update_asset(self, asset_type, attributes, tags=None,
+                     installed_software=None, assessment_name=None):
+        """PARTIAL asset edit via import merge: can ADD or UPDATE attributes,
+        tags and installed software on the asset matched by `attributes`.
+
+        Cannot: remove attributes/tags, change the matching identity
+        (ip/hostname/repository...), or move the asset — those need a real
+        PATCH /v1/assets/<id>, which API v1.27 does not provide (see
+        gaps registry / phx gaps --required).
+        """
+        return self.enrich_asset(
+            asset_type=asset_type, attributes=attributes, tags=tags,
+            installed_software=installed_software,
+            assessment_name=assessment_name or "CLI Asset Update",
+        )
+
     def delete_asset(self, asset_id=None):
         """NOT SUPPORTED — flagged gap."""
         raise PhoenixNotSupportedError(

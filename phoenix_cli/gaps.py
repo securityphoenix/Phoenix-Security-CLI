@@ -14,11 +14,13 @@ GAPS = [
         "gap": "No endpoint to update a single finding: status changes, "
                "risk acceptance, false-positive marking and comments are "
                "UI-only.",
-        "workaround": "Re-import via POST /v1/import/assets (merge) to update "
-                      "severity/description/remedy/tags; omit a finding from a "
-                      "new/merge import to auto-close it.",
-        "cli": "phx findings enrich (workaround) / phx findings update-status "
-               "(stub, explains the gap)",
+        "workaround": "phx findings close automates closure (merge re-import "
+                      "of the asset omitting the finding, assessment-scoped); "
+                      "phx findings add adds new findings (delta); phx "
+                      "findings enrich updates severity/description/remedy/"
+                      "tags. Risk-accept/false-positive remain UI-only.",
+        "cli": "phx findings add / close / enrich (workarounds); "
+               "phx findings update-status (stub, explains the gap)",
     },
     {
         "operation": "findings set-severity (override)",
@@ -47,9 +49,11 @@ GAPS = [
         "severity": "medium",
         "gap": "No endpoint to update asset attributes directly, and no "
                "asset delete/decommission endpoint.",
-        "workaround": "Attribute enrichment via import merge "
-                      "(phx assets enrich); deletion is UI-only.",
-        "cli": "phx assets enrich (workaround) / phx assets delete (stub)",
+        "workaround": "Additive attribute edits via import merge (phx assets "
+                      "update / enrich) — cannot remove attributes or change "
+                      "identity fields; deletion is UI-only.",
+        "cli": "phx assets update / enrich (partial) / phx assets delete "
+               "(stub)",
     },
     {
         "operation": "assets remove-tags",
@@ -135,6 +139,75 @@ GAPS = [
 ]
 
 
+# Endpoints the Phoenix API should add — the formal wishlist behind the
+# gaps above. Surfaced via `phx gaps --required` and the MCP
+# phoenix_api_gaps tool.
+REQUIRED_ENDPOINTS = [
+    {
+        "method": "PATCH",
+        "path": "/v1/findings/<finding-id>",
+        "purpose": "Update a single finding: status (open/close/reopen), "
+                   "severity override, risk acceptance, false-positive flag.",
+        "today": "Close only via merge re-import omitting the finding "
+                 "(phx findings close); other updates UI-only.",
+    },
+    {
+        "method": "POST",
+        "path": "/v1/findings/<finding-id>/comments",
+        "purpose": "Attach triage comments/notes to a finding.",
+        "today": "Abuse of 'details' JSON on re-import, or UI.",
+    },
+    {
+        "method": "POST",
+        "path": "/v1/assets",
+        "purpose": "Direct synchronous asset creation returning the asset ID "
+                   "(get-or-create contract).",
+        "today": "Side effect of POST /v1/import/assets; ID must be "
+                 "re-discovered by searching.",
+    },
+    {
+        "method": "PATCH",
+        "path": "/v1/assets/<asset-id>",
+        "purpose": "Edit asset attributes (incl. removing attributes and "
+                   "changing identity fields), criticality, locality.",
+        "today": "Additive-only via import merge (phx assets update).",
+    },
+    {
+        "method": "DELETE",
+        "path": "/v1/assets/<asset-id>",
+        "purpose": "Remove/decommission an asset.",
+        "today": "Not possible via API — UI only.",
+    },
+    {
+        "method": "PATCH",
+        "path": "/v1/assets/<asset-id>/tags",
+        "purpose": "Remove asset tags (parity with app/component tag "
+                   "removal).",
+        "today": "Not possible via API — UI only.",
+    },
+    {
+        "method": "DELETE",
+        "path": "/v1/applications/<application-id>",
+        "purpose": "Delete an application/environment (parity with "
+                   "components).",
+        "today": "UI only.",
+    },
+    {
+        "method": "GET",
+        "path": "/v1/scanners",
+        "purpose": "Enumerate valid scannerType codes for findings filters.",
+        "today": "Undocumented; values must be reverse-engineered.",
+    },
+    {
+        "method": "GET",
+        "path": "/v1/import/requests/<request-id>",
+        "purpose": "Documented, stable import job status polling (plus "
+                   "webhooks for completion).",
+        "today": "Undocumented translate-request endpoint; empty 200 bodies.",
+    },
+]
+
+
 def as_rows():
     return [
         {
@@ -145,4 +218,16 @@ def as_rows():
             "workaround": g["workaround"],
         }
         for g in GAPS
+    ]
+
+
+def required_endpoint_rows():
+    return [
+        {
+            "method": e["method"],
+            "path": e["path"],
+            "purpose": e["purpose"],
+            "workaround today": e["today"],
+        }
+        for e in REQUIRED_ENDPOINTS
     ]
