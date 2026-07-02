@@ -59,15 +59,16 @@ deletion are UI-only.
 
 ## Required endpoints (formal API wishlist)
 
-The machine-readable registry behind this document lives in
-`phoenix_cli/gaps.py` (`REQUIRED_ENDPOINTS`) and is surfaced by
-**`phx gaps --required`** and the MCP `phoenix_api_gaps` tool
-(`requiredEndpoints`). Current list: `PATCH /v1/findings/<id>` (status/
-override/risk-accept/false-positive), `POST /v1/findings/<id>/comments`,
-`POST /v1/assets` (direct create), `PATCH /v1/assets/<id>`,
-`DELETE /v1/assets/<id>`, `PATCH /v1/assets/<id>/tags` (remove),
-`DELETE /v1/applications/<id>`, `GET /v1/scanners`,
-`GET /v1/import/requests/<id>` (+ webhooks).
+Full specifications — proposed request/response schemas, priorities and
+migration notes — live in **[REQUIRED_ENDPOINTS.md](REQUIRED_ENDPOINTS.md)**.
+The machine-readable registry lives in `phoenix_cli/gaps.py`
+(`REQUIRED_ENDPOINTS`) and is surfaced by **`phx gaps --required`** and the
+MCP `phoenix_api_gaps` tool (`requiredEndpoints`). Current list:
+`PATCH /v1/findings/<id>` (status/override/risk-accept/false-positive),
+`POST /v1/findings/<id>/comments`, `POST /v1/assets` (direct create),
+`PATCH /v1/assets/<id>`, `DELETE /v1/assets/<id>`,
+`PATCH /v1/assets/<id>/tags` (remove), `DELETE /v1/applications/<id>`,
+`GET /v1/scanners`, `GET /v1/import/requests/<id>` (+ webhooks).
 
 ## Medium-impact gaps
 
