@@ -163,6 +163,7 @@ client.create_asset("CLOUD", {
 - [openapi/phoenix-security-api-v1.27.yaml](openapi/) — OpenAPI (Swagger) spec: browse in Swagger UI, import into Postman, generate clients
 - [docs/GAP_ANALYSIS.md](docs/GAP_ANALYSIS.md) — API capability gaps & workarounds
 - MCP server (use Phoenix from Claude & other AI agents): [Pheonix-Security-Orange-MPC](https://github.com/Security-Phoenix-demo/Pheonix-Security-Orange-MPC)
+- AI platform skills (Claude, ChatGPT, Codex, Cursor) wrapping this CLI + the MCP server: [skills/](https://github.com/Security-Phoenix-demo/Pheonix-Security-Orange-MPC/tree/main/skills)
 
 ## Exit codes
 
