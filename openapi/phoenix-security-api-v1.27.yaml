@@ -1,0 +1,3371 @@
+openapi: 3.0.3
+info:
+  title: Phoenix Security API — Enterprise
+  version: "1.27"
+  description: >-
+    REST API for the Phoenix Security platform (Enterprise edition, API
+    specification v1.27, 15 April 2026). Covers asset management, findings
+    (vulnerabilities), assessment imports, applications/environments,
+    components/services, asset association rules, teams, and users.
+
+
+    Authentication is a two-step flow. Obtain an opaque Bearer token from
+    `GET /v1/auth/access_token` using HTTP Basic auth with your API Client ID
+    and Client Secret (created in the platform UI under Organisation > API
+    Access; the secret is shown only once at creation time). Include the token
+    as `Authorization: Bearer <token>` on every other request. Tokens are
+    time-limited (`expiry` Unix timestamp is returned but no fixed lifetime is
+    documented) — handle 401 responses by re-authenticating and retrying.
+
+
+    Conventions worth knowing:
+
+    * List/search endpoints for assets and findings are POST-as-search
+      (filters go in the request body); assets are created only through
+      `POST /v1/import/assets`.
+
+    * Paged endpoints use `pageNumber` (0-based) and `pageSize` query
+      parameters and return a standard envelope
+      (`content`, `first`, `last`, `pageNumber`, `pageNumberOfElements`,
+      `pageSize`, `totalElements`, `totalPages`).
+
+    * Many ID-based endpoints have a name-based "selector" variant — same URL
+      without the ID path segment, plus an `applicationSelector` /
+      `componentSelector` / `teamSelector` object in the request body.
+
+    * Default entities (Default Application, Default Component/Service) are
+      protected — tag, responsible-user, repository, deploy, and delete
+      operations must not target them.
+
+    * Rate limits are not documented in v1.27.
+
+
+    Useful links: Phoenix Security platform https://securityphoenix.com —
+    documentation portal https://docs.securityphoenix.cloud
+  contact:
+    name: Phoenix Security Support
+    url: https://securityphoenix.com
+servers:
+  - url: https://api.securityphoenix.cloud
+    description: SaaS production
+  - url: https://api.demo.appsecphx.io
+    description: Non-production / demo
+  - url: https://api.poc1.appsecphx.io
+    description: Enterprise PoC
+  - url: https://api.{tenant}.securityphoenix.cloud
+    description: Dedicated Enterprise (tenant-specific deployment)
+    variables:
+      tenant:
+        default: mycompany
+        description: >-
+          Subdomain of your dedicated Enterprise deployment, e.g. platform at
+          https://mycompany.securityphoenix.cloud uses API base
+          https://api.mycompany.securityphoenix.cloud
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Obtain access tokens using API credentials (Client ID / Client Secret).
+  - name: Assets
+    description: Query the asset registry and manage asset tags.
+  - name: Findings
+    description: >-
+      Search and retrieve findings (vulnerabilities). `/v1/findings` and
+      `/v1/vulnerabilities` are aliases of each other.
+  - name: Import
+    description: Import assets and their vulnerabilities (JSON equivalent of the UI Assessment Import).
+  - name: Applications
+    description: >-
+      Applications and Environments. The `/v1/applications` resource covers
+      both entity kinds, distinguished by `type` (APPLICATION or ENVIRONMENT).
+  - name: Components
+    description: >-
+      Components (inside Applications) and Services (inside Environments).
+      The `/v1/components` resource covers both.
+  - name: Rules
+    description: Asset association rules that map assets to Components and Services.
+  - name: Teams
+    description: Teams, team membership, and team auto-link configuration.
+  - name: Users
+    description: Organisation users — list, create, activate, deactivate.
+paths:
+  /v1/auth/access_token:
+    get:
+      operationId: getAccessToken
+      tags: [Auth]
+      summary: Obtain an access token
+      description: >-
+        Exchanges API credentials (Client ID as username, Client Secret as
+        password, via HTTP Basic auth) for an opaque Bearer token. The
+        returned `expiry` is a Unix timestamp; due to possible server time
+        shift, do not rely on it alone — handle 401 responses by
+        re-authenticating. Note that this endpoint uses GET with Basic auth
+        (not a POST/OAuth form flow).
+      security:
+        - basicAuth: []
+      responses:
+        "200":
+          description: Token issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/ServerError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+  /v1/assets:
+    post:
+      operationId: listAssets
+      tags: [Assets]
+      summary: List/search assets
+      description: >-
+        Obtain the paged, filtered asset list. This is a POST used as a
+        search — filters go in the request body (this endpoint does NOT
+        create assets; assets are created via `POST /v1/import/assets`).
+        `types` is required in each request object; `type` (singular) is
+        deprecated but still functioning and, when provided, is added to
+        `types`. If `componentServiceId` is present, `applicationEnvironmentId`
+        is ignored. `onlyUnassigned=true` fetches only assets not assigned to
+        any Environment (i.e. assigned to a Default Environment).
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetListRequest"
+      responses:
+        "200":
+          description: Paged asset list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/assets/{assetId}:
+    get:
+      operationId: getAsset
+      tags: [Assets]
+      summary: Get a single asset
+      description: >-
+        Get details of a single asset by its internal ID (the `id` field of
+        the asset list response). Note a field-name inconsistency present in
+        the source specification — the single-asset response uses
+        `resource_type` while the list response uses `resourceType`.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      responses:
+        "200":
+          description: Asset detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/assets/{assetId}/tags:
+    put:
+      operationId: addAssetTags
+      tags: [Assets]
+      summary: Add tags to one asset
+      description: >-
+        Add tags to a single asset identified by the path ID. In this
+        variant the `assetIds` body field is ignored. Tag `value` is
+        required, `key` is optional.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddAssetTagsRequest"
+      responses:
+        "200":
+          description: Tags added.
+        "201":
+          description: Tags added (created).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/assets/tags:
+    put:
+      operationId: addTagsToAssets
+      tags: [Assets]
+      summary: Add tags to multiple assets
+      description: >-
+        Add tags to multiple assets. In this variant (no asset ID in the
+        path) the `assetIds` body field is REQUIRED and lists the asset IDs
+        the tags will be added to.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AddAssetTagsRequest"
+                - type: object
+                  required: [assetIds]
+      responses:
+        "200":
+          description: Tags added.
+        "201":
+          description: Tags added (created).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/findings:
+    post:
+      operationId: searchFindings
+      tags: [Findings]
+      summary: Search findings
+      description: >-
+        Search findings (POST-as-search; all filters are optional and go in
+        the request body). Alias path `POST /v1/vulnerabilities` behaves
+        identically. `cves` values must start with the `CVE-` prefix; the
+        list of valid `scannerTypes` codes must be requested from Phoenix
+        (no list endpoint exists in v1.27). `tagCategories` narrows the
+        `tagKeys`/`tagValues` search.
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FindingSearchRequest"
+      responses:
+        "200":
+          description: Paged finding list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/findings/{findingId}:
+    get:
+      operationId: getFinding
+      tags: [Findings]
+      summary: Get a single finding
+      description: >-
+        Get details of a single finding/vulnerability by its internal ID
+        (from the `id` field of the findings list response). Alias path
+        `GET /v1/vulnerabilities/{findingId}` behaves identically.
+      parameters:
+        - $ref: "#/components/parameters/FindingId"
+      responses:
+        "200":
+          description: Finding detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Finding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/vulnerabilities:
+    post:
+      operationId: searchVulnerabilities
+      tags: [Findings]
+      summary: Search findings (alias of /v1/findings)
+      description: Alias of `POST /v1/findings` — identical semantics, filters in the body.
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FindingSearchRequest"
+      responses:
+        "200":
+          description: Paged finding list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FindingsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/vulnerabilities/{findingId}:
+    get:
+      operationId: getVulnerability
+      tags: [Findings]
+      summary: Get a single finding (alias of /v1/findings/{findingId})
+      description: Alias of `GET /v1/findings/{findingId}` — identical semantics.
+      parameters:
+        - $ref: "#/components/parameters/FindingId"
+      responses:
+        "200":
+          description: Finding detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Finding"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/import/assets:
+    post:
+      operationId: importAssets
+      tags: [Import]
+      summary: Import assets and vulnerabilities
+      description: >-
+        Import assets and their vulnerabilities into Phoenix in one call
+        (developer-friendly JSON equivalent of the platform UI Assessment
+        Import area).
+
+
+        IMPORTANT — `importType` semantics: with `delta`, the report may
+        contain only a subset of assets/vulnerabilities; the platform
+        adds/updates what is in the report and removes/alters nothing else.
+        With `new` or `merge`, the report is assumed to include ALL
+        vulnerabilities currently present in all assets in the assessment
+        scope — anything present in a previous report for this assessment but
+        absent from the new report is assumed addressed and WILL BE CLOSED
+        (`new` first removes existing vulnerabilities from the assets;
+        `merge` updates as required). Importing a delta report as new/merge
+        will close vulnerabilities you may not have intended to close.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ImportRequest"
+      responses:
+        "200":
+          description: Import accepted/processed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /v1/applications:
+    get:
+      operationId: listApplications
+      tags: [Applications]
+      summary: List applications and environments
+      description: >-
+        List applications and environments (paged). Use the optional `type`
+        query parameter to fetch only APPLICATION or only ENVIRONMENT
+        entities.
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+        - name: type
+          in: query
+          required: false
+          description: Only fetch entities of this type.
+          schema:
+            type: string
+            enum: [APPLICATION, ENVIRONMENT]
+      responses:
+        "200":
+          description: Paged application/environment list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createApplication
+      tags: [Applications]
+      summary: Create an application or environment
+      description: >-
+        Create a new application or environment. `subType` (CLOUD or INFRA)
+        is required when `type` is ENVIRONMENT. `owner` is required and must
+        contain `id` or `email` of an existing user. `threshold`, when
+        omitted, is inherited from the Organization threshold. Optional
+        `ticketing`/`messaging` blocks configure workflow integrations
+        (`projectName`/`channelName` is the only required field inside those
+        blocks).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApplicationRequest"
+      responses:
+        "200":
+          description: Created application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "201":
+          description: Created application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      operationId: updateApplication
+      tags: [Applications]
+      summary: Update an application or environment
+      description: >-
+        Update an existing application or environment. The specification
+        documents this operation at the collection path (no ID segment); the
+        entity is identified via an `applicationSelector` in the request
+        body, per the "identifying applications/environments by name"
+        convention. All updatable fields are optional — only supplied fields
+        change. Must not target the Default Application.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateApplicationRequest"
+      responses:
+        "200":
+          description: Updated application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}:
+    get:
+      operationId: getApplication
+      tags: [Applications]
+      summary: Get a single application or environment
+      description: Get details of one application/environment by its Phoenix ID.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: Application/environment detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}/posture:
+    get:
+      operationId: getApplicationPosture
+      tags: [Applications]
+      summary: Get application/environment posture (by ID)
+      description: >-
+        Get posture (open/closed finding counts by risk bucket, asset totals)
+        for one application/environment. A selector-based alternative exists
+        at `POST /v1/applications/posture`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+        - $ref: "#/components/parameters/ExcludeRiskAccepted"
+      responses:
+        "200":
+          description: Application posture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationPosture"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/posture:
+    post:
+      operationId: getApplicationPostureBySelector
+      tags: [Applications]
+      summary: Get application/environment posture (by selector)
+      description: >-
+        Same as `GET /v1/applications/{applicationId}/posture` but the
+        application/environment is identified by an `applicationSelector`
+        (name, optionally case-insensitive) in the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplicationPostureSelectorRequest"
+      responses:
+        "200":
+          description: Application posture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplicationPosture"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}/tags:
+    put:
+      operationId: addApplicationTags
+      tags: [Applications]
+      summary: Add tags to an application/environment
+      description: >-
+        Add tags to an application/environment. Must not target the Default
+        Application. Selector variant available at
+        `PUT /v1/applications/tags`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddTagsRequest"
+      responses:
+        "200":
+          description: Updated application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: removeApplicationTags
+      tags: [Applications]
+      summary: Remove tags from an application/environment
+      description: >-
+        Remove tags from an application/environment. `action` must be
+        `delete`. If a tag object specifies `id`, its `key`/`value` are
+        ignored. Must not target the Default Application. Selector variant
+        available at `PATCH /v1/applications/tags`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveTagsRequest"
+      responses:
+        "204":
+          description: Tags removed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No tags matched for removal (or entity not found).
+  /v1/applications/tags:
+    put:
+      operationId: addApplicationTagsBySelector
+      tags: [Applications]
+      summary: Add tags to an application/environment (by selector)
+      description: >-
+        Selector variant of `PUT /v1/applications/{applicationId}/tags` —
+        identifies the application/environment by name via
+        `applicationSelector` in the body. Must not target the Default
+        Application.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AddTagsRequest"
+                - $ref: "#/components/schemas/ApplicationSelectorBody"
+      responses:
+        "200":
+          description: Updated application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: removeApplicationTagsBySelector
+      tags: [Applications]
+      summary: Remove tags from an application/environment (by selector)
+      description: >-
+        Selector variant of `PATCH /v1/applications/{applicationId}/tags` —
+        identifies the application/environment by name via
+        `applicationSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RemoveTagsRequest"
+                - $ref: "#/components/schemas/ApplicationSelectorBody"
+      responses:
+        "204":
+          description: Tags removed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No tags matched for removal (or entity not found).
+  /v1/applications/{applicationId}/responsible-users:
+    put:
+      operationId: addApplicationResponsibleUsers
+      tags: [Applications]
+      summary: Add responsible users to an application/environment
+      description: >-
+        Add responsible users; users are added to the existing list if not
+        already present. Each user object needs `id` or `email` and the users
+        must already exist in the organisation. Must not target the Default
+        Application. Selector variant available at
+        `PUT /v1/applications/responsible-users`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResponsibleUsersRequest"
+      responses:
+        "200":
+          description: Updated application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/responsible-users:
+    put:
+      operationId: addApplicationResponsibleUsersBySelector
+      tags: [Applications]
+      summary: Add responsible users to an application/environment (by selector)
+      description: >-
+        Selector variant of
+        `PUT /v1/applications/{applicationId}/responsible-users` —
+        identifies the application/environment via `applicationSelector` in
+        the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ResponsibleUsersRequest"
+                - $ref: "#/components/schemas/ApplicationSelectorBody"
+      responses:
+        "200":
+          description: Updated application/environment.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}/deploy:
+    patch:
+      operationId: addApplicationDeploymentLinks
+      tags: [Applications]
+      summary: Add/replace deployment link(s) on an Application
+      description: >-
+        Add or replace deployment links (Application → Service deployment
+        mapping). The path ID MUST be an Application ID, not an
+        Environment's. The singular `serviceSelector` is legacy (kept for
+        backward compatibility) and picks only the FIRST matching service;
+        prefer the plural `serviceSelectors`, which selects ALL matching
+        services. Selector precedence within a selector object is id(s),
+        then name(s), then tags — only the first provided is used.
+        `replaceExisting` defaults to true (replace rather than add).
+        Selector variant available at `PATCH /v1/applications/deploy`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplicationDeployRequest"
+      responses:
+        "200":
+          description: Updated application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No service found (or application not found).
+  /v1/applications/deploy:
+    patch:
+      operationId: addApplicationDeploymentLinksBySelector
+      tags: [Applications]
+      summary: Add/replace deployment link(s) on an Application (by selector)
+      description: >-
+        Selector variant of `PATCH /v1/applications/{applicationId}/deploy` —
+        identifies the Application via `applicationSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/ApplicationDeployRequest"
+                - $ref: "#/components/schemas/ApplicationSelectorBody"
+      responses:
+        "200":
+          description: Updated application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No service found (or application not found).
+  /v1/applications/{applicationId}/repository:
+    post:
+      operationId: linkApplicationRepository
+      tags: [Applications]
+      summary: Link a repository (repository rule) to an app/env
+      description: >-
+        Add a "repository rule" to an app/env — associates any asset with a
+        `repository` attribute matching the given name. Adds the rule to an
+        existing component (when `component.id` or `component.name` matches
+        one) or creates a new component for it (named after the repository
+        when no `component` is given). Constraint — if `component` is
+        provided the repository must not already exist inside that
+        component; otherwise a new component is created and the repository
+        must not already exist inside the application. Must not target the
+        Default Application (nor the Default Component). Selector variant
+        available at `POST /v1/applications/repository`.
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RepositoryLinkRequest"
+      responses:
+        "200":
+          description: Updated application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "201":
+          description: Repository rule created; updated application returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/repository:
+    post:
+      operationId: linkApplicationRepositoryBySelector
+      tags: [Applications]
+      summary: Link a repository to an app/env (by selector)
+      description: >-
+        Selector variant of
+        `POST /v1/applications/{applicationId}/repository` — identifies the
+        app/env via `applicationSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RepositoryLinkRequest"
+                - $ref: "#/components/schemas/ApplicationSelectorBody"
+      responses:
+        "200":
+          description: Updated application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "201":
+          description: Repository rule created; updated application returned.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/components:
+    get:
+      operationId: listComponents
+      tags: [Components]
+      summary: List components and services
+      description: >-
+        List components and services (paged). `parentId` limits the scope to
+        one Application or Environment; `type` filters COMPONENT vs SERVICE.
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSize"
+        - name: parentId
+          in: query
+          required: false
+          description: Application or Environment ID (UUID) to limit the scope.
+          schema:
+            type: string
+            format: uuid
+        - name: type
+          in: query
+          required: false
+          description: Only fetch entities of this type.
+          schema:
+            type: string
+            enum: [COMPONENT, SERVICE]
+      responses:
+        "200":
+          description: Paged component/service list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createComponent
+      tags: [Components]
+      summary: Create a component or service
+      description: >-
+        Create a new component (in an Application) or service (in an
+        Environment). `applicationSelector` (by ID or name) and `name` are
+        required. Optional `ticketing`/`messaging` blocks configure workflow
+        integrations. Returns 409 if a component with the same name already
+        exists in that application.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateComponentRequest"
+      responses:
+        "201":
+          description: Created component/service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A component with the same name already exists in the application.
+    delete:
+      operationId: deleteComponentBySelector
+      tags: [Components]
+      summary: Delete a component/service (by selector)
+      description: >-
+        Delete a component/service identified by name rather than ID. Both
+        `applicationSelector` (ID or name) and `componentSelector` (name) are
+        required, in the DELETE request body. Must not target the Default
+        Component or Service.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeleteComponentRequest"
+      responses:
+        "204":
+          description: Component/service deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/components/{componentId}:
+    get:
+      operationId: getComponent
+      tags: [Components]
+      summary: Get a single component/service
+      description: Get details of one component/service by its Phoenix ID.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      responses:
+        "200":
+          description: Component/service detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: updateComponent
+      tags: [Components]
+      summary: Update a component/service
+      description: >-
+        Update an existing component/service. All fields optional. Tags are
+        ADDED to the component unless the same key/value combination is
+        already present.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateComponentRequest"
+      responses:
+        "200":
+          description: Updated component/service.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Component"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteComponent
+      tags: [Components]
+      summary: Delete a component/service (by ID)
+      description: >-
+        Delete a component/service by ID. Must not target the Default
+        Component or Service. Where possible, prefer the selector-based
+        variant (`DELETE /v1/components`) for more precise identification.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      responses:
+        "204":
+          description: Component/service deleted.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/components/{componentId}/posture:
+    get:
+      operationId: getComponentPosture
+      tags: [Components]
+      summary: Get component/service posture (by ID)
+      description: >-
+        Posture counts (open/closed findings by risk bucket, asset totals)
+        for one component/service. A selector-based alternative exists at
+        `POST /v1/components/posture`.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+        - $ref: "#/components/parameters/ExcludeRiskAccepted"
+      responses:
+        "200":
+          description: Component posture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentPosture"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/components/posture:
+    post:
+      operationId: getComponentPostureBySelector
+      tags: [Components]
+      summary: Get component/service posture (by selector)
+      description: >-
+        Same as `GET /v1/components/{componentId}/posture` but the
+        component/service is identified via a `selector` object combining
+        `applicationSelector` and `componentSelector`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentPostureSelectorRequest"
+      responses:
+        "200":
+          description: Component posture.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ComponentPosture"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/components/{componentId}/tags:
+    patch:
+      operationId: removeComponentTags
+      tags: [Components]
+      summary: Remove tags from a component/service
+      description: >-
+        Remove tags from a component/service. `action` must be `delete`. If
+        a tag object specifies `id`, its `key`/`value` are ignored. Must not
+        target the Default Component or Service.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveTagsRequest"
+      responses:
+        "204":
+          description: Tags removed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No tags matched for removal (or entity not found).
+  /v1/components/{componentId}/deploy:
+    patch:
+      operationId: addComponentDeploymentLinks
+      tags: [Components]
+      summary: Add deployment link(s) to a Component
+      description: >-
+        Add deployment links (Component → Service(s)). The path ID MUST be a
+        Component's ID, not a Service's. With `inheritFromApp=true` the
+        Component inherits its deployment configuration from its Application
+        and all other parameters are ignored. `serviceSelectors` (plural)
+        selects ALL matching services (unlike the legacy singular
+        `serviceSelector` on the Application deploy endpoint, which picks
+        only the first match). Precedence within the selector is ids, then
+        names, then tags. `replaceExisting` defaults to true.
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ComponentDeployRequest"
+      responses:
+        "200":
+          description: Deployment links updated.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: No service found (or component not found).
+  /v1/components/{componentId}/rules:
+    post:
+      operationId: addComponentRules
+      tags: [Rules]
+      summary: Add/replace asset association rules (by component ID)
+      description: >-
+        Add or replace asset association rules on a Component/Service. When
+        the component ID is provided in the path, the `selector` body field
+        is ignored. Rules are deduplicated by their definition (filters),
+        not by name. `resetRules=true` replaces existing rules with the
+        provided array; the default (false) only adds new rules. A
+        `negateFilter` excludes matching assets from the rule's selection
+        and cannot contain another `negateFilter` (no nesting).
+      parameters:
+        - $ref: "#/components/parameters/ComponentId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddRulesRequest"
+      responses:
+        "201":
+          description: Rules added; the body indicates the number of rules added.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: All provided rules are already present.
+  /v1/components/rules:
+    post:
+      operationId: addComponentRulesBySelector
+      tags: [Rules]
+      summary: Add/replace asset association rules (by selector)
+      description: >-
+        Same as `POST /v1/components/{componentId}/rules` but the
+        Component/Service is identified via the `selector` body field
+        (`applicationSelector` + `componentSelector`), which is required in
+        this variant.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AddRulesRequest"
+                - type: object
+                  required: [selector]
+      responses:
+        "201":
+          description: Rules added; the body indicates the number of rules added.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: All provided rules are already present.
+  /v1/teams:
+    get:
+      operationId: listTeams
+      tags: [Teams]
+      summary: List teams
+      description: List user Teams in the organisation (paged; defaults pageNumber=0, pageSize=100).
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSizeLarge"
+      responses:
+        "200":
+          description: Paged team list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TeamsPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createTeam
+      tags: [Teams]
+      summary: Create a team
+      description: >-
+        Create a team. `name` must be unique in the organisation; `type` is
+        GENERAL or SECURITY.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateTeamRequest"
+      responses:
+        "200":
+          description: Created team.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "201":
+          description: Created team.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A team with the same name already exists.
+  /v1/teams/{teamId}:
+    get:
+      operationId: getTeam
+      tags: [Teams]
+      summary: Get a single team
+      description: Details for one Team.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team detail.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/{teamId}/users:
+    get:
+      operationId: listTeamMembers
+      tags: [Teams]
+      summary: Get team members
+      description: >-
+        List members (users) in a Team. Note — the response is a bare JSON
+        array, NOT the paged envelope used elsewhere.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Team member list (bare array).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UserRef"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: addTeamMembers
+      tags: [Teams]
+      summary: Add users to a team
+      description: >-
+        Add new team members. Each user object needs `id` or `email`. With
+        `autoCreateUsers=true`, users identified by email who don't exist are
+        auto-created with the Org User role (first name = email username
+        part, last name = "User"). With the default (false), unknown emails
+        cause a 400 "Invalid user email". Returns 409 if all listed users
+        are already team members. Selector variant available at
+        `PUT /v1/teams/users`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddTeamMembersRequest"
+      responses:
+        "200":
+          description: Users added (no body).
+        "400":
+          description: A user id/email was not found in the platform (and autoCreateUsers not enabled).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: All users in the request are already team members; no changes made.
+  /v1/teams/users:
+    put:
+      operationId: addTeamMembersBySelector
+      tags: [Teams]
+      summary: Add users to a team (by selector)
+      description: >-
+        Selector variant of `PUT /v1/teams/{teamId}/users` — identifies the
+        team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AddTeamMembersRequest"
+                - $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: Users added (no body).
+        "400":
+          description: A user id/email was not found in the platform (and autoCreateUsers not enabled).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: All users in the request are already team members; no changes made.
+  /v1/teams/{teamId}/users/{userEmail}:
+    delete:
+      operationId: removeTeamMember
+      tags: [Teams]
+      summary: Remove a team member
+      description: Remove a single member (user), identified by email, from a Team.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+        - name: userEmail
+          in: path
+          required: true
+          description: Email address of the user to remove from the team.
+          schema:
+            type: string
+            format: email
+      responses:
+        "204":
+          description: Member removed.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/{teamId}/applications/auto-link/tags:
+    post:
+      operationId: setTeamApplicationAutoLinkTags
+      tags: [Teams]
+      summary: Configure app/env auto-link tags for a team
+      description: >-
+        Configure the auto-link tags used to link applications and
+        environments to a team. `match` is ANY or ALL; when omitted, ANY is
+        used for a team without an existing rule, otherwise the existing
+        rule's expression is kept. Returns 409 if the match mode is not
+        provided (or unchanged) and all tags are already configured.
+        Selector variant available at
+        `POST /v1/teams/applications/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoLinkTagsRequest"
+      responses:
+        "200":
+          description: Auto-link tags configured (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Match mode not provided/unchanged and all tags already configured.
+    patch:
+      operationId: removeTeamApplicationAutoLinkTags
+      tags: [Teams]
+      summary: Remove specific app/env auto-link tags from a team
+      description: >-
+        Remove specific tags previously configured in the team for
+        auto-linking to Apps/Envs. Each tag requires `id` or `key`/`value`
+        (`id` takes precedence). Selector variant available at
+        `PATCH /v1/teams/applications/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveTagsRequest"
+      responses:
+        "204":
+          description: Tags removed from the team configuration.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: None of the tags exist in the team configuration.
+    delete:
+      operationId: clearTeamApplicationAutoLinkTags
+      tags: [Teams]
+      summary: Remove ALL app/env auto-link tags from a team
+      description: >-
+        Remove ANY/ALL tags previously configured for auto-linking
+        Apps/Envs; afterwards the team has no auto-linking-by-tags
+        configured. Selector variant available at
+        `DELETE /v1/teams/applications/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: All auto-link tags removed (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/applications/auto-link/tags:
+    post:
+      operationId: setTeamApplicationAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Configure app/env auto-link tags for a team (by selector)
+      description: >-
+        Selector variant of
+        `POST /v1/teams/{teamId}/applications/auto-link/tags` — identifies
+        the team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AutoLinkTagsRequest"
+                - $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: Auto-link tags configured (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Match mode not provided/unchanged and all tags already configured.
+    patch:
+      operationId: removeTeamApplicationAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Remove specific app/env auto-link tags from a team (by selector)
+      description: >-
+        Selector variant of
+        `PATCH /v1/teams/{teamId}/applications/auto-link/tags` — identifies
+        the team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RemoveTagsRequest"
+                - $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "204":
+          description: Tags removed from the team configuration.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: None of the tags exist in the team configuration.
+    delete:
+      operationId: clearTeamApplicationAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Remove ALL app/env auto-link tags from a team (by selector)
+      description: >-
+        Selector variant of
+        `DELETE /v1/teams/{teamId}/applications/auto-link/tags` — identifies
+        the team by name via `teamSelector` in the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: All auto-link tags removed (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/{teamId}/applications/auto-link/users:
+    post:
+      operationId: enableTeamApplicationAutoLinkByMembers
+      tags: [Teams]
+      summary: Enable auto-linking apps/envs by team members
+      description: >-
+        Enable auto-linking of the team to the applications/environments its
+        team members are responsible for ("Auto-link based on Team Members"
+        in the UI). No request body is documented. Selector variant
+        available at `POST /v1/teams/applications/auto-link/users`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Auto-link by team members enabled (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: disableTeamApplicationAutoLinkByMembers
+      tags: [Teams]
+      summary: Disable auto-linking apps/envs by team members
+      description: >-
+        Disable the "Auto-link based on Team Members" setting. Selector
+        variant available at `DELETE /v1/teams/applications/auto-link/users`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: Auto-link by team members disabled (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/applications/auto-link/users:
+    post:
+      operationId: enableTeamApplicationAutoLinkByMembersBySelector
+      tags: [Teams]
+      summary: Enable auto-linking apps/envs by team members (by selector)
+      description: >-
+        Selector variant of
+        `POST /v1/teams/{teamId}/applications/auto-link/users` — identifies
+        the team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: Auto-link by team members enabled (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: disableTeamApplicationAutoLinkByMembersBySelector
+      tags: [Teams]
+      summary: Disable auto-linking apps/envs by team members (by selector)
+      description: >-
+        Selector variant of
+        `DELETE /v1/teams/{teamId}/applications/auto-link/users` —
+        identifies the team by name via `teamSelector` in the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: Auto-link by team members disabled (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/{teamId}/components/auto-link/tags:
+    post:
+      operationId: setTeamComponentAutoLinkTags
+      tags: [Teams]
+      summary: Configure component auto-link tags for a team
+      description: >-
+        Configure the auto-link tags used to link Components and Services to
+        a team. Same body and `match` defaulting rules as the app/env
+        variant. Returns 409 if the match mode is not provided (or
+        unchanged) and all tags are already configured. Selector variant
+        available at `POST /v1/teams/components/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoLinkTagsRequest"
+      responses:
+        "200":
+          description: Auto-link tags configured (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Match mode not provided/unchanged and all tags already configured.
+    patch:
+      operationId: removeTeamComponentAutoLinkTags
+      tags: [Teams]
+      summary: Remove specific component auto-link tags from a team
+      description: >-
+        Remove specific tags previously configured in the team for
+        auto-linking to Components/Services. Each tag requires `id` or
+        `key`/`value` (`id` takes precedence). Selector variant available at
+        `PATCH /v1/teams/components/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveTagsRequest"
+      responses:
+        "204":
+          description: Tags removed from the team configuration.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: None of the tags exist in the team configuration.
+    delete:
+      operationId: clearTeamComponentAutoLinkTags
+      tags: [Teams]
+      summary: Remove ALL component auto-link tags from a team
+      description: >-
+        Remove ANY/ALL tags previously configured for auto-linking
+        Components (or Services); afterwards the team has no
+        Component/Service auto-linking-by-tags configured. Selector variant
+        available at `DELETE /v1/teams/components/auto-link/tags`.
+      parameters:
+        - $ref: "#/components/parameters/TeamId"
+      responses:
+        "200":
+          description: All component auto-link tags removed (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/teams/components/auto-link/tags:
+    post:
+      operationId: setTeamComponentAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Configure component auto-link tags for a team (by selector)
+      description: >-
+        Selector variant of
+        `POST /v1/teams/{teamId}/components/auto-link/tags` — identifies the
+        team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AutoLinkTagsRequest"
+                - $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: Auto-link tags configured (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Match mode not provided/unchanged and all tags already configured.
+    patch:
+      operationId: removeTeamComponentAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Remove specific component auto-link tags from a team (by selector)
+      description: >-
+        Selector variant of
+        `PATCH /v1/teams/{teamId}/components/auto-link/tags` — identifies
+        the team by name via `teamSelector` in the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/RemoveTagsRequest"
+                - $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "204":
+          description: Tags removed from the team configuration.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: None of the tags exist in the team configuration.
+    delete:
+      operationId: clearTeamComponentAutoLinkTagsBySelector
+      tags: [Teams]
+      summary: Remove ALL component auto-link tags from a team (by selector)
+      description: >-
+        Selector variant of
+        `DELETE /v1/teams/{teamId}/components/auto-link/tags` — identifies
+        the team by name via `teamSelector` in the request body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TeamSelectorBody"
+      responses:
+        "200":
+          description: All component auto-link tags removed (no body).
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/users:
+    get:
+      operationId: listUsers
+      tags: [Users]
+      summary: List users
+      description: >-
+        List all users defined within the organisation (paged; defaults
+        pageNumber=0, pageSize=100).
+      parameters:
+        - $ref: "#/components/parameters/PageNumber"
+        - $ref: "#/components/parameters/PageSizeLarge"
+      responses:
+        "200":
+          description: Paged user list.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsersPage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      operationId: createUser
+      tags: [Users]
+      summary: Create a user
+      description: >-
+        Create a new user in the organisation and send welcome and
+        one-time-password emails to the address (equivalent to creating a
+        user through the UI). Email must be unique in the organisation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserRequest"
+      responses:
+        "200":
+          description: Created user.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "409":
+          description: A user already exists with the same email.
+  /v1/users/deactivate:
+    post:
+      operationId: deactivateUsers
+      tags: [Users]
+      summary: Deactivate users
+      description: >-
+        Deactivate one or more users; deactivated users lose platform access
+        immediately. Users can be identified by ID, email, or a combination
+        of both — at least one of `ids`/`emails` must be present and
+        non-empty. Duplicates across the two lists are resolved
+        automatically; deactivating an already-deactivated user has no
+        effect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserIdsEmailsRequest"
+      responses:
+        "200":
+          description: Users deactivated (no body).
+        "400":
+          description: Neither `ids` nor `emails` provided, or both empty.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: A user ID or email doesn't belong to the organisation of the access token.
+  /v1/users/activate:
+    post:
+      operationId: activateUsers
+      tags: [Users]
+      summary: Activate users
+      description: >-
+        Activate one or more previously deactivated users, restoring
+        platform access. Same identification rules as deactivation;
+        activating an already-active user has no effect.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserIdsEmailsRequest"
+      responses:
+        "200":
+          description: Users activated (no body).
+        "400":
+          description: Neither `ids` nor `emails` provided, or both empty.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: A user ID or email doesn't belong to the organisation of the access token.
+components:
+  securitySchemes:
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >-
+        HTTP Basic authentication with API Client ID as the username and
+        Client Secret as the password. Used ONLY by
+        `GET /v1/auth/access_token`.
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >-
+        Opaque Bearer token obtained from `GET /v1/auth/access_token`.
+        Required on every other endpoint.
+  parameters:
+    PageNumber:
+      name: pageNumber
+      in: query
+      required: false
+      description: 0-based page number.
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      description: Page size (default 20 on this endpoint).
+      schema:
+        type: integer
+        minimum: 1
+        default: 20
+    PageSizeLarge:
+      name: pageSize
+      in: query
+      required: false
+      description: Page size (default 100 on this endpoint).
+      schema:
+        type: integer
+        minimum: 1
+        default: 100
+    AssetId:
+      name: assetId
+      in: path
+      required: true
+      description: Internal asset ID (UUID), as returned in the `id` field of the asset list response.
+      schema:
+        type: string
+        format: uuid
+    FindingId:
+      name: findingId
+      in: path
+      required: true
+      description: Internal vulnerability ID (UUID), from the `id` field of the findings list response.
+      schema:
+        type: string
+        format: uuid
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      description: Phoenix ID (UUID) of the Application or Environment.
+      schema:
+        type: string
+        format: uuid
+    ComponentId:
+      name: componentId
+      in: path
+      required: true
+      description: Phoenix ID (UUID) of the Component or Service.
+      schema:
+        type: string
+        format: uuid
+    TeamId:
+      name: teamId
+      in: path
+      required: true
+      description: Phoenix ID (UUID) of the Team.
+      schema:
+        type: string
+        format: uuid
+    ExcludeRiskAccepted:
+      name: excludeRiskAccepted
+      in: query
+      required: false
+      description: >-
+        Whether posture counts should exclude findings that have been "risk
+        accepted". Defaults to false (all findings counted).
+      schema:
+        type: boolean
+        default: false
+  responses:
+    BadRequest:
+      description: Bad request (invalid or missing input).
+    Unauthorized:
+      description: Access token (or credentials) missing, incorrect, or expired. Obtain a new token and retry.
+    NotFound:
+      description: Item doesn't exist, or the API credentials don't have access to it.
+    Conflict:
+      description: Conflict (duplicate name, or all items already present).
+    ServerError:
+      description: Internal error executing the request (rare); may be transient or permanent. Do not retry indefinitely.
+    ServiceUnavailable:
+      description: API service temporarily unreachable, likely to recover shortly. Retry a limited number of times.
+  schemas:
+    TokenResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: Opaque Bearer token to include in all subsequent API requests.
+        expiry:
+          type: integer
+          format: int64
+          description: >-
+            Token expiration time as a Unix timestamp. No fixed lifetime is
+            documented; do not rely on this alone — handle 401 and
+            re-authenticate.
+    Tag:
+      type: object
+      description: Key/value tag. `value` is required everywhere tags are written; `key` is optional.
+      required: [value]
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+    TagWithId:
+      type: object
+      description: >-
+        Tag object used in removal and auto-link operations. May carry an
+        `id` (UUID); when `id` is specified, `key`/`value` are ignored (id
+        takes precedence).
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        value:
+          type: string
+    FindingTag:
+      type: object
+      description: Tag as returned on findings — includes the tag category.
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+        category:
+          type: string
+          enum: [TECH_STACK, ALERT, COMPLIANCE, BUSINESS_UNIT, GENERAL]
+    PagedEnvelope:
+      type: object
+      description: Standard paged response envelope (item type varies per endpoint).
+      properties:
+        first:
+          type: boolean
+        last:
+          type: boolean
+        pageNumber:
+          type: integer
+        pageNumberOfElements:
+          type: integer
+        pageSize:
+          type: integer
+        totalElements:
+          type: integer
+        totalPages:
+          type: integer
+    AssetData:
+      type: object
+      description: Per-source asset attribute data. Attribute names/types differ per asset type.
+      properties:
+        source:
+          type: string
+        attributes:
+          type: object
+          additionalProperties: true
+    Asset:
+      type: object
+      description: Asset as returned by the asset list endpoint.
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        type:
+          type: string
+        resourceType:
+          type: string
+        locality:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetData"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+    AssetDetail:
+      type: object
+      description: >-
+        Asset as returned by the single-asset endpoint. Note the source
+        specification uses `resource_type` (snake_case) here, while the list
+        endpoint uses `resourceType` — reproduce carefully in clients.
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        type:
+          type: string
+        resource_type:
+          type: string
+        locality:
+          type: string
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetData"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+    AssetsPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/Asset"
+    AssetSearchFilter:
+      type: object
+      description: >-
+        Per-domain asset filters. The filter object is a union of
+        domain-specific fields (CLOUD, INFRA, WEB/API, SAST/SCA/Container);
+        the source document lists `cidr` under both the INFRA and WEB/API
+        groups.
+      properties:
+        key:
+          type: string
+        locality:
+          type: array
+          items:
+            type: string
+        tagKeys:
+          type: array
+          items:
+            type: string
+        tagValues:
+          type: array
+          items:
+            type: string
+        resourceType:
+          type: array
+          description: CLOUD filter.
+          items:
+            type: string
+        providerAccountId:
+          type: array
+          description: CLOUD filter.
+          items:
+            type: string
+        vpc:
+          type: array
+          description: CLOUD filter.
+          items:
+            type: string
+        subnet:
+          type: array
+          description: CLOUD filter.
+          items:
+            type: string
+        region:
+          type: array
+          description: CLOUD filter.
+          items:
+            type: string
+        cidr:
+          type: string
+          description: INFRA and WEB/API filter.
+        hostnames:
+          type: array
+          description: INFRA filter.
+          items:
+            type: string
+        osNames:
+          type: array
+          description: INFRA filter.
+          items:
+            type: string
+        netbios:
+          type: array
+          description: INFRA filter.
+          items:
+            type: string
+        macAddress:
+          type: array
+          description: INFRA filter.
+          items:
+            type: string
+        fqdn:
+          type: array
+          description: WEB/API filter.
+          items:
+            type: string
+        repository:
+          type: array
+          description: SAST/SCA/Container filter.
+          items:
+            type: string
+        build:
+          type: array
+          description: SAST/SCA/Container filter.
+          items:
+            type: string
+        dockerfile:
+          type: array
+          description: SAST/SCA/Container filter.
+          items:
+            type: string
+        scannerSource:
+          type: array
+          description: SAST/SCA/Container filter.
+          items:
+            type: string
+    AssetSearchCriteria:
+      type: object
+      description: One asset search request element.
+      required: [types]
+      properties:
+        type:
+          type: string
+          deprecated: true
+          description: Deprecated — use `types`. Still functioning; if provided it is added to `types`.
+        types:
+          type: array
+          description: Asset types to return. Required.
+          items:
+            type: string
+        applicationEnvironmentId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the Application or Environment to return assets from.
+        componentServiceId:
+          type: string
+          format: uuid
+          description: >-
+            Phoenix ID of the Component (App) or Service (Env) to return
+            assets from; if present, `applicationEnvironmentId` is ignored.
+        onlyUnassigned:
+          type: boolean
+          default: false
+          description: >-
+            true = fetch only assets not assigned to any Environment (i.e.
+            assigned to a Default Environment).
+        filters:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetSearchFilter"
+    AssetListRequest:
+      type: object
+      description: Body of the asset list/search endpoint.
+      required: [requests]
+      properties:
+        requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetSearchCriteria"
+    AddAssetTagsRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        assetIds:
+          type: array
+          description: >-
+            Asset IDs the tags will be added to. Required in the variant
+            without an asset ID in the path; otherwise ignored.
+          items:
+            type: string
+            format: uuid
+    FindingSearchRequest:
+      type: object
+      description: All filters are optional.
+      properties:
+        applicationEnvironmentId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the Application or Environment to return vulnerabilities from.
+        componentServiceId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the Component (App) or Service (Env).
+        assetId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the Asset.
+        assetAssignedStatus:
+          type: string
+          enum: [ASSIGNED, UNASSIGNED]
+        assetLocalities:
+          type: array
+          items:
+            type: string
+            enum: [INTERNAL, EXTERNAL, DMZ]
+        type:
+          type: string
+          enum: [WEB, CLOUD, FOSS, SAST, CONTAINER, INFRA]
+        scannerTypes:
+          type: array
+          description: Scanner codes (request the list of valid codes from Phoenix).
+          items:
+            type: string
+        status:
+          type: array
+          items:
+            type: string
+            enum: [OPEN, CLOSED]
+        suggestedToFix:
+          type: boolean
+        zeroDayAlert:
+          type: boolean
+        dateFrom:
+          type: string
+          format: date
+          description: Format yyyy-MM-dd.
+        dateTo:
+          type: string
+          format: date
+          description: Format yyyy-MM-dd.
+        severityScoreFrom:
+          type: string
+          description: 0-1000.
+        severityScoreTo:
+          type: string
+          description: 0-1000.
+        cves:
+          type: array
+          description: Each value must start with the `CVE-` prefix.
+          items:
+            type: string
+            pattern: "^CVE-"
+        epssScoreFrom:
+          type: string
+          description: 0.0-1.0.
+        epssScoreTo:
+          type: string
+          description: 0.0-1.0.
+        workflowTicketStatuses:
+          type: array
+          items:
+            type: string
+        slaBreach:
+          type: string
+          enum: ["true", "false"]
+        workflowTicketSlaBreach:
+          type: string
+          enum: ["true", "false"]
+        tagKeys:
+          type: array
+          items:
+            type: string
+        tagValues:
+          type: array
+          items:
+            type: string
+        tagCategories:
+          type: array
+          description: Narrows the tagKeys/tagValues search.
+          items:
+            type: string
+            enum: [TECH_STACK, ALERT, COMPLIANCE, BUSINESS_UNIT, GENERAL]
+        teamIds:
+          type: array
+          description: Team IDs (UUID) to filter findings by.
+          items:
+            type: string
+            format: uuid
+    FindingData:
+      type: object
+      properties:
+        spid:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        remedy:
+          type: string
+        cve:
+          type: string
+        type:
+          type: string
+    FindingParent:
+      type: object
+      properties:
+        applicationId:
+          type: string
+          format: uuid
+        applicationName:
+          type: string
+        componentId:
+          type: string
+          format: uuid
+        componentName:
+          type: string
+    SlaPolicyTarget:
+      type: object
+      properties:
+        targetDays:
+          type: number
+        targetDate:
+          type: string
+          format: date
+        breach:
+          type: boolean
+    SlaPolicy:
+      type: object
+      properties:
+        vulnerability:
+          $ref: "#/components/schemas/SlaPolicyTarget"
+        workflowTicket:
+          $ref: "#/components/schemas/SlaPolicyTarget"
+    WorkflowTicket:
+      type: object
+      properties:
+        integrationWorkflowId:
+          type: string
+          format: uuid
+        workflowId:
+          type: string
+          format: uuid
+        workflowType:
+          type: string
+        externalLink:
+          type: boolean
+        externalName:
+          type: string
+        externalUrl:
+          type: string
+        details:
+          type: object
+          additionalProperties: true
+        createdDateTime:
+          type: string
+          format: date-time
+    Finding:
+      type: object
+      description: A finding (vulnerability).
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [OPEN, CLOSED]
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingData"
+        assetId:
+          type: string
+          format: uuid
+        parents:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingParent"
+        scannerTargetId:
+          type: string
+          format: uuid
+        severityScore:
+          type: number
+        exposed:
+          type: boolean
+        location:
+          type: string
+        dateFrom:
+          type: string
+          format: date
+        dateTo:
+          type: string
+          format: date
+        suggestedToFix:
+          type: boolean
+        origin:
+          type: string
+        epssScore:
+          type: number
+          minimum: 0
+          maximum: 1
+        daysOpen:
+          type: number
+        duplicate:
+          type: boolean
+        scannerName:
+          type: string
+        scannerType:
+          type: string
+        hasFalsePositiveRequest:
+          type: boolean
+        falsePositiveRequestDaysInQueue:
+          type: number
+        assetLocality:
+          type: string
+        slaPolicy:
+          $ref: "#/components/schemas/SlaPolicy"
+        workflowTickets:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowTicket"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/FindingTag"
+    FindingsPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/Finding"
+    ImportAssetAttributes:
+      type: object
+      description: >-
+        Asset detail fields; which fields are required depends on the
+        assessment `assetType`. INFRA requires `ip` and `hostname`; WEB
+        requires one of `ip`/`fqdn`; CLOUD requires `providerType`
+        (AWS/AZURE/GCP) and `providerAccountId` (`region` also required for
+        Azure); CONTAINER requires `dockerfile`; REPOSITORY requires
+        `repository`; BUILD requires `buildFile`; CODE requires
+        `scannerSource`.
+      properties:
+        ip:
+          type: string
+        hostname:
+          type: string
+        network:
+          type: string
+        fqdn:
+          type: string
+        os:
+          type: string
+        netbios:
+          type: string
+        macAddress:
+          type: string
+        providerType:
+          type: string
+          enum: [AWS, AZURE, GCP]
+        providerAccountId:
+          type: string
+          description: For example an AWS ARN.
+        providerAccountName:
+          type: string
+          description: User-friendly account name.
+        providerResourceId:
+          type: string
+          description: Native resource ID from the cloud provider.
+        resourceGroup:
+          type: string
+          description: If available from the cloud provider.
+        region:
+          type: string
+          description: Required for Azure; optional for AWS and GCP.
+        vpc:
+          type: string
+        subnet:
+          type: string
+        repository:
+          type: string
+          description: Required for Repo assets.
+        buildFile:
+          type: string
+          description: Required for Build assets.
+        dockerfile:
+          type: string
+          description: Required for Container assets.
+        scannerSource:
+          type: string
+          description: Required for Code assets (JAR file, ZIP file, Snyk project, ...).
+        origin:
+          type: string
+          description: For example "github".
+      additionalProperties: true
+    ImportFinding:
+      type: object
+      required: [name, description, remedy, severity]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        remedy:
+          type: string
+        severity:
+          type: string
+          description: String from "1.0" to "10.0" (note this differs from the 0-1000 severityScore search scale).
+        location:
+          type: string
+          description: For example a source file or asset name. Required for CODE assets.
+        referenceIds:
+          type: array
+          description: CVE, GHSA and other IDs.
+          items:
+            type: string
+        cwes:
+          type: array
+          description: CWEs in the form "CWE-xxxx".
+          items:
+            type: string
+        publishedDateTime:
+          type: string
+          description: Format "YYYY:MM:DD HH:MM:SS"; defaults to the current date-time.
+        details:
+          type: object
+          description: Any additional details; captured and displayed by the platform.
+          additionalProperties: true
+    InstalledSoftware:
+      type: object
+      required: [vendor, name, version]
+      properties:
+        vendor:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+          description: SemVer.
+        cpe:
+          type: string
+    AssetImport:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        attributes:
+          $ref: "#/components/schemas/ImportAssetAttributes"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        installedSoftware:
+          type: array
+          items:
+            $ref: "#/components/schemas/InstalledSoftware"
+        findings:
+          type: array
+          items:
+            $ref: "#/components/schemas/ImportFinding"
+    ImportAssessment:
+      type: object
+      properties:
+        assetType:
+          type: string
+          description: Asset type of the assessment (INFRA, WEB, CLOUD, CONTAINER, REPOSITORY, CODE, BUILD).
+        name:
+          type: string
+          description: Name for a new assessment (used when `id` is null).
+    ImportRequest:
+      type: object
+      required: [importType]
+      properties:
+        importType:
+          type: string
+          enum: [new, merge, delta]
+          description: >-
+            delta = add/update only what is in the report, remove nothing.
+            new/merge = the report includes ALL current vulnerabilities in
+            scope; anything absent (vs the previous report for this
+            assessment) is assumed addressed and WILL BE CLOSED. `new`
+            removes existing vulnerabilities from the assets before
+            importing; `merge` updates as required. Importing a delta report
+            as new/merge will close vulnerabilities unintentionally.
+        assessment:
+          $ref: "#/components/schemas/ImportAssessment"
+        assets:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetImport"
+    UserRef:
+      type: object
+      description: User identification object; either `id` or `email` must be provided.
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+    OpenByRisk:
+      type: object
+      properties:
+        critical:
+          type: number
+        high:
+          type: number
+        medium:
+          type: number
+        low:
+          type: number
+        none:
+          type: number
+    PostureStats:
+      type: object
+      properties:
+        findings:
+          type: object
+          properties:
+            open:
+              type: number
+            closed:
+              type: number
+            openByRisk:
+              $ref: "#/components/schemas/OpenByRisk"
+        assets:
+          type: object
+          properties:
+            total:
+              type: number
+    Application:
+      type: object
+      description: >-
+        Application or Environment (distinguished by `type`). `subType` is
+        set for Environments only.
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        owner:
+          $ref: "#/components/schemas/UserRef"
+        criticality:
+          type: number
+          minimum: 1
+          maximum: 10
+        value:
+          type: number
+          minimum: 1000
+          maximum: 10000000
+        risk:
+          type: number
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1000
+        aboveThreshold:
+          type: boolean
+        type:
+          type: string
+          enum: [APPLICATION, ENVIRONMENT]
+        subType:
+          type: string
+          enum: [CLOUD, INFRA]
+          description: Environments only; otherwise null/missing.
+        responsibleUsers:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRef"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        stats:
+          $ref: "#/components/schemas/PostureStats"
+        default:
+          type: boolean
+          description: Whether this is the protected Default Application/Environment.
+    ApplicationsPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/Application"
+    ApplicationPosture:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        criticality:
+          type: number
+        value:
+          type: number
+        risk:
+          type: number
+        riskMagnitude:
+          type: number
+        threshold:
+          type: number
+        aboveThreshold:
+          type: boolean
+        type:
+          type: string
+          enum: [APPLICATION, ENVIRONMENT]
+        default:
+          type: boolean
+        posture:
+          $ref: "#/components/schemas/PostureStats"
+    Ticketing:
+      type: object
+      description: >-
+        Optional workflow-ticketing configuration. The platform picks the
+        integration by `integrationId` first, then `integrationName`,
+        otherwise any available one (restricted to `integrationType` if
+        given); the project is picked by ID if provided, otherwise by name.
+      required: [projectName]
+      properties:
+        integrationId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the workflow integration.
+        integrationName:
+          type: string
+          description: Phoenix display name of the workflow integration.
+        projectId:
+          type: string
+          description: External platform's ID for the ticketing project/backlog.
+        projectName:
+          type: string
+          description: Display name, or key, of the project/backlog. The only required field.
+        integrationType:
+          type: string
+          enum: [JIRA, JIRA_DC, ADO, GITHUB, SERVICE_NOW]
+    Messaging:
+      type: object
+      description: >-
+        Optional messaging configuration. Selection rules mirror the
+        ticketing block; the channel is picked by ID if provided, otherwise
+        by name.
+      required: [channelName]
+      properties:
+        integrationId:
+          type: string
+          format: uuid
+          description: Phoenix ID of the workflow integration.
+        integrationName:
+          type: string
+          description: Phoenix display name of the workflow integration.
+        channelId:
+          type: string
+          description: External platform's ID for the messaging channel.
+        channelName:
+          type: string
+          description: Display name of the channel. The only required field.
+        integrationType:
+          type: string
+          enum: [SLACK]
+    CreateApplicationRequest:
+      type: object
+      required: [name, type, criticality, owner]
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        type:
+          type: string
+          enum: [APPLICATION, ENVIRONMENT]
+        subType:
+          type: string
+          enum: [CLOUD, INFRA]
+          description: Required for ENVIRONMENT type.
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1000
+          description: Optional; otherwise inherited from the Organization threshold.
+        value:
+          type: number
+          minimum: 1000
+          maximum: 10000000
+        criticality:
+          type: number
+          minimum: 1
+          maximum: 10
+        owner:
+          $ref: "#/components/schemas/UserRef"
+        responsibleUsers:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRef"
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        ticketing:
+          $ref: "#/components/schemas/Ticketing"
+        messaging:
+          $ref: "#/components/schemas/Messaging"
+    UpdateApplicationRequest:
+      type: object
+      description: >-
+        All fields optional; only supplied fields change. The target entity
+        is identified via `applicationSelector` per the
+        identify-by-name convention.
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        threshold:
+          type: number
+          minimum: 0
+          maximum: 1000
+        value:
+          type: number
+          minimum: 1000
+          maximum: 10000000
+        criticality:
+          type: number
+          minimum: 1
+          maximum: 10
+        owner:
+          $ref: "#/components/schemas/UserRef"
+        ticketing:
+          $ref: "#/components/schemas/Ticketing"
+        messaging:
+          $ref: "#/components/schemas/Messaging"
+    ApplicationSelector:
+      type: object
+      description: Identifies an Application/Environment by ID or name.
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        caseSensitive:
+          type: boolean
+          default: true
+    ComponentSelector:
+      type: object
+      description: Identifies a Component/Service by name within the selected application.
+      required: [name]
+      properties:
+        name:
+          type: string
+        caseSensitive:
+          type: boolean
+          default: true
+    TeamSelector:
+      type: object
+      description: Identifies a Team by name.
+      required: [name]
+      properties:
+        name:
+          type: string
+        caseSensitive:
+          type: boolean
+          default: true
+    ApplicationSelectorBody:
+      type: object
+      description: Body fragment carrying the application selector for ID-less endpoint variants.
+      required: [applicationSelector]
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+    TeamSelectorBody:
+      type: object
+      description: Body fragment carrying the team selector for ID-less endpoint variants.
+      required: [teamSelector]
+      properties:
+        teamSelector:
+          $ref: "#/components/schemas/TeamSelector"
+    ComponentScopeSelector:
+      type: object
+      description: Combined selector identifying a Component/Service within an App/Environment.
+      required: [applicationSelector, componentSelector]
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+        componentSelector:
+          $ref: "#/components/schemas/ComponentSelector"
+    ApplicationPostureSelectorRequest:
+      type: object
+      required: [applicationSelector]
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+        excludeRiskAccepted:
+          type: boolean
+          default: false
+    ComponentPostureSelectorRequest:
+      type: object
+      required: [selector]
+      properties:
+        selector:
+          $ref: "#/components/schemas/ComponentScopeSelector"
+        excludeRiskAccepted:
+          type: boolean
+          default: false
+    AddTagsRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+    RemoveTagsRequest:
+      type: object
+      required: [action, tags]
+      properties:
+        action:
+          type: string
+          enum: [delete]
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/TagWithId"
+    ResponsibleUsersRequest:
+      type: object
+      required: [responsibleUsers]
+      properties:
+        responsibleUsers:
+          type: array
+          description: Users must already exist in the organisation.
+          items:
+            $ref: "#/components/schemas/UserRef"
+    ServiceSelector:
+      type: object
+      description: >-
+        LEGACY singular service selector (kept for backward compatibility;
+        prefer `serviceSelectors`). At least one of `id`, `name` or `tags`
+        must be provided; if more than one is provided only the first in
+        this order is used - id, name, tags. Name/tag matches pick only the
+        FIRST matching service.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Phoenix ID of the service the application deploys onto.
+        name:
+          type: string
+          description: Service name; if multiple services match, the FIRST one is used.
+        caseSensitive:
+          type: boolean
+          default: true
+        tags:
+          type: array
+          description: Services must match at least ONE of the tags; only the FIRST matching service is used.
+          items:
+            $ref: "#/components/schemas/Tag"
+        matchAssetTags:
+          type: boolean
+          default: true
+          description: Also match services by the tags in their assets as well as the service's own tags.
+    ServiceSelectors:
+      type: object
+      description: >-
+        Preferred plural service selector. At least one of `ids`, `names` or
+        `tags` must be provided; if more than one is provided only the first
+        in this order is used - ids, names, tags. Name/tag matches select
+        ALL matching services.
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        names:
+          type: array
+          description: Service name(s); if multiple services match a name, they will ALL be selected.
+          items:
+            type: string
+        caseSensitive:
+          type: boolean
+          default: true
+        tags:
+          type: array
+          description: Services must match at least ONE of the tags; ALL matching services are selected.
+          items:
+            $ref: "#/components/schemas/Tag"
+        matchAssetTags:
+          type: boolean
+          default: true
+          description: Also match services by the tags in their assets as well as the service's own tags.
+    ApplicationDeployRequest:
+      type: object
+      properties:
+        serviceSelector:
+          $ref: "#/components/schemas/ServiceSelector"
+        serviceSelectors:
+          $ref: "#/components/schemas/ServiceSelectors"
+        replaceExisting:
+          type: boolean
+          default: true
+          description: true = selector(s) replace the existing configuration; false = added to it.
+    ComponentDeployRequest:
+      type: object
+      properties:
+        inheritFromApp:
+          type: boolean
+          default: false
+          description: >-
+            true = the Component inherits its deployment configuration from
+            its Application; other parameters are then ignored.
+        serviceSelectors:
+          $ref: "#/components/schemas/ServiceSelectors"
+        replaceExisting:
+          type: boolean
+          default: true
+          description: true = replace existing configuration; false = add to it.
+    RepositoryLinkRequest:
+      type: object
+      required: [repository]
+      properties:
+        repository:
+          type: string
+          description: >-
+            Repository name for the rule (also used as part of the component
+            name when creating a new component if `component.name` is not
+            provided).
+        search:
+          type: string
+          description: >-
+            Search substring matched on asset IDs while selecting assets
+            from the matching repository (selects a subset of assets within
+            the repository).
+        component:
+          type: object
+          description: >-
+            Which component the repository rule is added to. If absent, a
+            new component is created using the repository name. `name` is
+            required unless `id` is present; `id` must not be the Default
+            Component.
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+              description: Custom name for a new component; must be unique in the application.
+            criticality:
+              type: number
+              minimum: 1
+              maximum: 10
+              description: Overrides the application's criticality.
+            tags:
+              type: array
+              items:
+                $ref: "#/components/schemas/Tag"
+    Component:
+      type: object
+      description: Component (inside an Application) or Service (inside an Environment).
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        applicationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        criticality:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 10
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        default:
+          type: boolean
+          description: Whether this is the protected Default Component/Service.
+    ComponentsPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/Component"
+    ComponentPosture:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        organizationId:
+          type: string
+          format: uuid
+        applicationId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        criticality:
+          type: number
+        risk:
+          type: number
+        riskMagnitude:
+          type: number
+        default:
+          type: boolean
+        posture:
+          $ref: "#/components/schemas/PostureStats"
+    CreateComponentRequest:
+      type: object
+      required: [applicationSelector, name]
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        criticality:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 10
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        ticketing:
+          $ref: "#/components/schemas/Ticketing"
+        messaging:
+          $ref: "#/components/schemas/Messaging"
+    UpdateComponentRequest:
+      type: object
+      description: >-
+        All fields optional. Tags are added to the component unless the same
+        key/value combination is already present.
+      properties:
+        name:
+          type: string
+          minLength: 3
+          maxLength: 255
+        criticality:
+          type: number
+          nullable: true
+          minimum: 1
+          maximum: 10
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        ticketing:
+          $ref: "#/components/schemas/Ticketing"
+        messaging:
+          $ref: "#/components/schemas/Messaging"
+    DeleteComponentRequest:
+      type: object
+      required: [applicationSelector, componentSelector]
+      properties:
+        applicationSelector:
+          $ref: "#/components/schemas/ApplicationSelector"
+        componentSelector:
+          $ref: "#/components/schemas/ComponentSelector"
+    IpRange:
+      type: object
+      properties:
+        from:
+          type: string
+          description: Start IP address.
+        to:
+          type: string
+          description: End IP address.
+    RuleFilterBase:
+      type: object
+      description: >-
+        Asset association rule filter. The filter object is a union of
+        fields; which apply depends on the parent entity kind - Cloud
+        environments use providerAccountId/providerAccountName/resourceGroup;
+        Infra environments use assetType (INFRA|CONTAINER), cidrs, ipRanges,
+        hostnames, osNames, netbios; Applications (APPSEC) use assetType
+        (REPOSITORY|SOURCE_CODE|BUILD|WEBSITE_API), cidr(s), fqdn, repository
+        (repository applies to all asset types except WEBSITE_API). If
+        assetType is missing, all types are included.
+      properties:
+        ids:
+          type: array
+          description: Asset IDs; if provided, these assets - and only these - are selected by the rule.
+          items:
+            type: string
+            format: uuid
+        keyLike:
+          type: string
+          description: >-
+            Case-sensitive search substring matched against the asset key;
+            should be surrounded by `*` characters, e.g. "*prod*".
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/Tag"
+        providerAccountId:
+          type: array
+          description: Cloud - provider's account/subscription IDs.
+          items:
+            type: string
+        providerAccountName:
+          type: array
+          description: Cloud - friendly account/subscription names.
+          items:
+            type: string
+        resourceGroup:
+          type: array
+          description: Cloud - resource group names, if applicable.
+          items:
+            type: string
+        assetType:
+          type: string
+          enum: [INFRA, CONTAINER, REPOSITORY, SOURCE_CODE, BUILD, WEBSITE_API]
+          description: >-
+            INFRA|CONTAINER for Infra environments;
+            REPOSITORY|SOURCE_CODE|BUILD|WEBSITE_API for Applications. If
+            missing, all types are included.
+        cidrs:
+          type: array
+          description: Valid CIDR ranges.
+          items:
+            type: string
+        ipRanges:
+          type: array
+          items:
+            $ref: "#/components/schemas/IpRange"
+        hostnames:
+          type: array
+          items:
+            type: string
+        osNames:
+          type: array
+          items:
+            type: string
+        netbios:
+          type: array
+          items:
+            type: string
+        cidr:
+          type: string
+          description: APPSEC - single CIDR value (shown singular in the source document).
+        fqdn:
+          type: array
+          description: APPSEC - domain names to match.
+          items:
+            type: string
+        repository:
+          type: array
+          description: APPSEC - repository names to match (all asset types except WEBSITE_API).
+          items:
+            type: string
+    RuleFilter:
+      allOf:
+        - $ref: "#/components/schemas/RuleFilterBase"
+        - type: object
+          properties:
+            negateFilter:
+              $ref: "#/components/schemas/RuleFilterBase"
+    AssetRule:
+      type: object
+      required: [name, filter]
+      properties:
+        name:
+          type: string
+          description: The rule's name (rules are deduplicated by filters, not by name).
+        filter:
+          $ref: "#/components/schemas/RuleFilter"
+    AddRulesRequest:
+      type: object
+      required: [rules]
+      properties:
+        selector:
+          $ref: "#/components/schemas/ComponentScopeSelector"
+        rules:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetRule"
+        resetRules:
+          type: boolean
+          default: false
+          description: >-
+            true = existing rules are replaced with the provided rules
+            array; otherwise only new rules are added.
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        type:
+          type: string
+          enum: [GENERAL, SECURITY]
+        usersCount:
+          type: number
+    TeamsPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/Team"
+    CreateTeamRequest:
+      type: object
+      required: [name, type]
+      properties:
+        name:
+          type: string
+          description: Must be unique in the organisation.
+        type:
+          type: string
+          enum: [GENERAL, SECURITY]
+    AddTeamMembersRequest:
+      type: object
+      required: [users]
+      properties:
+        users:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserRef"
+        autoCreateUsers:
+          type: boolean
+          default: false
+          description: >-
+            When true, users identified by email who don't exist are
+            auto-created with the Org User role (first name = email
+            username part, last name = "User"). When false, unknown emails
+            cause 400 "Invalid user email".
+    AutoLinkTagsRequest:
+      type: object
+      required: [tags]
+      properties:
+        match:
+          type: string
+          enum: [ANY, ALL]
+          description: >-
+            Tag match expression. If not provided and the team has no
+            auto-link rule, ANY is used; if the team has an existing rule,
+            the existing expression is kept.
+        tags:
+          type: array
+          items:
+            $ref: "#/components/schemas/TagWithId"
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        firstName:
+          type: string
+        lastName:
+          type: string
+        active:
+          type: boolean
+        role:
+          type: string
+          enum: [ORG_ADMIN, ORG_APP_ADMIN, ORG_USER, ORG_ADMIN_LITE, ORG_SEC_ADMIN, ORG_SEC_DEV]
+    UsersPage:
+      allOf:
+        - $ref: "#/components/schemas/PagedEnvelope"
+        - type: object
+          properties:
+            content:
+              type: array
+              items:
+                $ref: "#/components/schemas/User"
+    CreateUserRequest:
+      type: object
+      required: [email, firstName, lastName, role]
+      properties:
+        email:
+          type: string
+          format: email
+          description: Must be unique in the organisation.
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [ORG_ADMIN, ORG_APP_ADMIN, ORG_USER, ORG_ADMIN_LITE, ORG_SEC_ADMIN, ORG_SEC_DEV]
+    UserIdsEmailsRequest:
+      type: object
+      description: >-
+        At least one of `ids` or `emails` must be present and non-empty.
+        Both may be sent together; duplicates across the two lists are
+        resolved automatically.
+      properties:
+        ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        emails:
+          type: array
+          items:
+            type: string
+            format: email

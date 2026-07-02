@@ -1,0 +1,16 @@
+# Phoenix Security CLI configuration example.
+# Copy to config.ini (git-ignored) and fill in your credentials, or prefer
+# environment variables: PHOENIX_CLIENT_ID / PHOENIX_CLIENT_SECRET /
+# PHOENIX_API_BASE_URL.
+#
+# Credentials are created in the Phoenix UI: Organisation > API Access.
+# NEVER commit real credentials.
+
+[phoenix]
+client_id = YOUR_CLIENT_ID
+client_secret = YOUR_CLIENT_SECRET
+# prod: https://api.securityphoenix.cloud
+# demo: https://api.demo.appsecphx.io
+# poc:  https://api.poc1.appsecphx.io
+# dedicated enterprise: https://api.<tenant>.securityphoenix.cloud
+api_base_url = https://api.securityphoenix.cloud

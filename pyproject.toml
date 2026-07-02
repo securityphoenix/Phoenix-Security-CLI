@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phoenix-security-cli"
+version = "1.0.0"
+description = "Official command-line interface for the Phoenix Security platform (REST API Enterprise v1.27)"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.9"
+authors = [
+    { name = "Phoenix Security", email = "support@phoenix.security" },
+]
+keywords = ["phoenix-security", "appsec", "vulnerability-management", "aspm", "cli"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+]
+dependencies = [
+    "click>=8.0",
+    "requests>=2.25",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "responses>=0.23",
+]
+
+[project.urls]
+Homepage = "https://phoenix.security"
+Repository = "https://github.com/Security-Phoenix-demo/Phoenix-Security-CLI"
+Documentation = "https://github.com/Security-Phoenix-demo/Phoenix-Security-CLI/tree/main/docs"
+
+[project.scripts]
+phoenix-cli = "phoenix_cli.cli.main:cli"
+phx = "phoenix_cli.cli.main:cli"
+
+[tool.hatch.build.targets.wheel]
+packages = ["phoenix_cli"]
