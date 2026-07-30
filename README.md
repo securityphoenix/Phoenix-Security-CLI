@@ -16,7 +16,7 @@ phx findings list --status OPEN --severity-from 700 -o json
 | Area | Commands | Coverage |
 |------|----------|----------|
 | Auth | `phx auth test`, `phx auth token` | Token flow (Basic → Bearer) |
-| Assets | `phx assets list/get/tag/create/update/enrich` | Search, tagging + creation & (additive) editing via the import pipeline |
+| Assets | `phx assets list/get/tag/remove-tags/create/update/enrich` | Search, tagging + creation & (additive) editing via the import pipeline |
 | Findings | `phx findings list/get/add/close/enrich` (alias `phx vulns`) | Every v1.27 search filter; add (delta), close (merge workaround) and enrich |
 | Import | `phx import file/status/template/types` | Bulk asset+finding imports (`new`/`merge`/`delta`) |
 | Applications & Environments | `phx apps …`, `phx envs …` | List, posture, create, update, tags, users, deploy links, repo rules |
@@ -101,6 +101,11 @@ phx assets create --type INFRA --attr ip=10.1.2.3 --attr hostname=web-01 \
 phx assets enrich --type INFRA --attr ip=10.1.2.3 --attr hostname=web-01 \
     --attr os="Ubuntu 22.04" --tag team:platform
 
+# Remove tags from one or more assets by their IDs
+phx assets remove-tags --asset-id <asset-id> --tag team:platform
+phx assets remove-tags --asset-id <asset-id-1> --asset-id <asset-id-2> \
+    --tag team:platform --tag temporary
+
 # Add a brand-new vulnerability to an asset (delta — never closes others)
 phx findings add --asset-type CONTAINER --asset-attr dockerfile=myorg/api:1.4 \
     --name "Hardcoded credential in entrypoint" --description "..." \
@@ -143,7 +148,7 @@ explanation instead of failing mysteriously:
 
 - `phx findings update-status` / `set-severity` / `comment` — no per-finding
   write endpoint (enrich via `phx findings enrich` import-merge instead)
-- `phx assets delete` / `remove-tags` — no asset delete or tag-removal endpoint
+- `phx assets delete` — no asset delete/decommission endpoint
 - `phx apps delete`, `phx teams delete`, `phx users delete` — not exposed by the API
 
 Run **`phx gaps`** for the full, always-current table with workarounds, and

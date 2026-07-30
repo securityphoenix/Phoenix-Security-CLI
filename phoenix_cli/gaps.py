@@ -56,15 +56,6 @@ GAPS = [
                "(stub)",
     },
     {
-        "operation": "assets remove-tags",
-        "area": "Assets",
-        "severity": "low",
-        "gap": "Asset tags can be added (PUT) but not removed via API — "
-               "unlike application and component tags.",
-        "workaround": "Remove asset tags in the platform UI.",
-        "cli": "phx assets remove-tags (stub)",
-    },
-    {
         "operation": "apps delete",
         "area": "Applications/Environments",
         "severity": "medium",
@@ -176,13 +167,6 @@ REQUIRED_ENDPOINTS = [
         "method": "DELETE",
         "path": "/v1/assets/<asset-id>",
         "purpose": "Remove/decommission an asset.",
-        "today": "Not possible via API — UI only.",
-    },
-    {
-        "method": "PATCH",
-        "path": "/v1/assets/<asset-id>/tags",
-        "purpose": "Remove asset tags (parity with app/component tag "
-                   "removal).",
         "today": "Not possible via API — UI only.",
     },
     {

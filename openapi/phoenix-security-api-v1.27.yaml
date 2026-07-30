@@ -197,6 +197,34 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: removeAssetTags
+      tags: [Assets]
+      summary: Remove tags from one asset
+      description: >-
+        Remove manual and dedicated REST tag ownership from one asset.
+        Scanner, system, CSV/XML import and REST bulk-import ownership is
+        protected. Omitting a tag key matches only a keyless GENERAL tag; it
+        is not a wildcard for every tag with that value.
+      parameters:
+        - $ref: "#/components/parameters/AssetId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveAssetTagsRequest"
+      responses:
+        "200":
+          description: Result for each requested asset-tag association.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoveAssetTagsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/assets/tags:
     put:
       operationId: addTagsToAssets
@@ -224,6 +252,31 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+    patch:
+      operationId: removeTagsFromAssets
+      tags: [Assets]
+      summary: Remove tags from multiple assets
+      description: >-
+        Apply source-aware tag removal to every requested asset-tag pair.
+        All asset IDs must belong to the authenticated organisation; an
+        invalid asset rejects the whole request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RemoveAssetTagsBulkRequest"
+      responses:
+        "200":
+          description: Result for each requested asset-tag association.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RemoveAssetTagsResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
   /v1/findings:
     post:
       operationId: searchFindings
@@ -2128,6 +2181,61 @@ components:
           items:
             type: string
             format: uuid
+    RemoveAssetTagsRequest:
+      type: object
+      required: [tags]
+      properties:
+        tags:
+          type: array
+          minItems: 1
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/Tag"
+    RemoveAssetTagsBulkRequest:
+      allOf:
+        - $ref: "#/components/schemas/RemoveAssetTagsRequest"
+        - type: object
+          required: [assetIds]
+          properties:
+            assetIds:
+              type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: string
+                format: uuid
+    RemoveAssetTagsResponse:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetTagRemovalResult"
+    AssetTagRemovalResult:
+      type: object
+      required: [entityId, tag, status, remainingOwnership]
+      properties:
+        entityId:
+          type: string
+          format: uuid
+        tag:
+          $ref: "#/components/schemas/Tag"
+        status:
+          type: string
+          enum: [DELETED, SOURCE_REMOVED, PROTECTED, NOT_FOUND]
+        remainingOwnership:
+          type: array
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - USER
+              - CSV_XML_IMPORT
+              - REST_API_IMPORT
+              - REST_API_TAG
+              - SCANNER_OR_SYSTEM
+              - UNKNOWN
     FindingSearchRequest:
       type: object
       description: All filters are optional.
@@ -3036,6 +3144,18 @@ components:
         default:
           type: boolean
           description: Whether this is the protected Default Component/Service.
+        effectiveExposure:
+          type: string
+          nullable: true
+          # `null` is listed so 3.0 validators accept the not-yet-calculated case.
+          enum: [INTERNAL, EXTERNAL, DMZ, null]
+          description: >-
+            Network exposure Phoenix *calculated* for this component/service —
+            not an exposure anyone declared. A component that is not deployed
+            takes it from its own assets; a deployed component takes the worst
+            exposure of the services it runs on; a deployment-target service
+            with no assets is treated as DMZ. `null` means no calculation has
+            been persisted yet — treat it as unknown, never as INTERNAL.
     ComponentsPage:
       allOf:
         - $ref: "#/components/schemas/PagedEnvelope"

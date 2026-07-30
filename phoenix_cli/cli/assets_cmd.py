@@ -16,7 +16,7 @@ ASSET_COLUMNS = ["id", "key", "type", "resourceType", "locality", "tags"]
 
 @click.group()
 def assets():
-    """Assets: search, get, tag, create, enrich."""
+    """Assets: search, get, add/remove tags, create, enrich."""
 
 
 @assets.command("list")
@@ -194,10 +194,20 @@ def delete(state, asset_id):
 
 
 @assets.command("remove-tags")
-@click.option("--asset-id")
-@click.option("--tag", "tags", multiple=True)
+@click.option("--asset-id", "asset_ids", multiple=True, required=True,
+              help="Asset ID (repeatable for bulk tag removal).")
+@click.option("--tag", "tags", multiple=True, required=True,
+              help="Tag as key:value or bare value (repeatable).")
 @pass_state
 @run
-def remove_tags(state, asset_id, tags):
-    """[NOT SUPPORTED] Remove asset tags — flagged API gap."""
-    state.client.remove_asset_tags(asset_id, tags)
+def remove_tags(state, asset_ids, tags):
+    """Remove manual and dedicated REST-API tag ownership from assets.
+
+    Scanner, system and bulk-import ownership is protected. The response
+    reports DELETED, SOURCE_REMOVED, PROTECTED or NOT_FOUND for each tag.
+    """
+    if len(asset_ids) == 1:
+        result = state.client.remove_asset_tags(tags, asset_id=asset_ids[0])
+    else:
+        result = state.client.remove_asset_tags(tags, asset_ids=list(asset_ids))
+    state.emit(result)
