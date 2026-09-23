@@ -23,6 +23,7 @@ phx findings list --status OPEN --severity-from 700 -o json
 | Components & Services | `phx components …`, `phx services …` | Full CRUD, posture, tags, deploy links, asset-association rules |
 | Teams | `phx teams …` | CRUD-ish, membership, auto-link by tags/members |
 | Users | `phx users …` | List, create, activate, deactivate |
+| Campaigns | `phx campaigns stats <id>` | Aggregated campaign statistics (risk, finding/asset/SLA counts, ticket summary) — read-only, post-v1.27 |
 | Anything else | `phx api METHOD /v1/...` | Authenticated escape hatch for any endpoint |
 | API gaps | `phx gaps` | Flags what the API **cannot** do (with workarounds) |
 
