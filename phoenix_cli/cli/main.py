@@ -90,6 +90,7 @@ def _register_commands():
         apps_cmd,
         assets_cmd,
         auth_cmd,
+        campaigns_cmd,
         components_cmd,
         findings_cmd,
         import_cmd,
@@ -107,6 +108,7 @@ def _register_commands():
     cli.add_command(components_cmd.services)
     cli.add_command(teams_cmd.teams)
     cli.add_command(users_cmd.users)
+    cli.add_command(campaigns_cmd.campaigns)
 
 
 _register_commands()

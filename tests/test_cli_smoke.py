@@ -42,8 +42,8 @@ def test_help_tree():
     result = runner.invoke(cli, ["--help"])
     assert result.exit_code == 0
     for group in ("auth", "assets", "findings", "vulns", "import", "apps",
-                  "envs", "components", "services", "teams", "users", "gaps",
-                  "api"):
+                  "envs", "components", "services", "teams", "users",
+                  "campaigns", "gaps", "api"):
         assert group in result.output
 
 
@@ -54,7 +54,7 @@ def test_help_tree():
     ["import", "file", "--help"], ["apps", "create", "--help"],
     ["components", "add-rules", "--help"], ["components", "list", "--help"],
     ["teams", "auto-link", "--help"],
-    ["users", "create", "--help"],
+    ["users", "create", "--help"], ["campaigns", "stats", "--help"],
 ])
 def test_subcommand_help(args):
     assert CliRunner().invoke(cli, args).exit_code == 0

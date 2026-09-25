@@ -16,6 +16,7 @@ payload construction are internal.
 
 from phoenix_cli.api.applications import ApplicationsAPI
 from phoenix_cli.api.assets import AssetsAPI
+from phoenix_cli.api.campaigns import CampaignsAPI
 from phoenix_cli.api.components import ComponentsAPI
 from phoenix_cli.api.findings import FindingsAPI
 from phoenix_cli.api.imports import ImportsAPI
@@ -26,7 +27,7 @@ from phoenix_cli.http import Transport
 
 
 class PhoenixClient(AssetsAPI, FindingsAPI, ImportsAPI, ApplicationsAPI,
-                    ComponentsAPI, TeamsAPI, UsersAPI):
+                    ComponentsAPI, TeamsAPI, UsersAPI, CampaignsAPI):
 
     def __init__(self, client_id=None, client_secret=None, base_url=None,
                  env=None, config_path=None, timeout=60, verify_tls=True,
