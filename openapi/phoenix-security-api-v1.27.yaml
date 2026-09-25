@@ -3155,7 +3155,7 @@ components:
             takes it from its own assets; a deployed component takes the worst
             exposure of the services it runs on; a deployment-target service
             with no assets is treated as DMZ. `null` means no calculation has
-            been persisted yet — treat it as unknown, never as INTERNAL.
+            been persisted yet.
     ComponentsPage:
       allOf:
         - $ref: "#/components/schemas/PagedEnvelope"

@@ -20,7 +20,7 @@ phx findings list --status OPEN --severity-from 700 -o json
 | Findings | `phx findings list/get/add/close/enrich` (alias `phx vulns`) | Every v1.27 search filter; add (delta), close (merge workaround) and enrich |
 | Import | `phx import file/status/template/types` | Bulk asset+finding imports (`new`/`merge`/`delta`) |
 | Applications & Environments | `phx apps …`, `phx envs …` | List, posture, create, update, tags, users, deploy links, repo rules |
-| Components & Services | `phx components …`, `phx services …` | Full CRUD, posture, tags, deploy links, asset-association rules |
+| Components & Services | `phx components …`, `phx services …` | Full CRUD, posture, tags, deploy links, asset-association rules, effective exposure |
 | Teams | `phx teams …` | CRUD-ish, membership, auto-link by tags/members |
 | Users | `phx users …` | List, create, activate, deactivate |
 | Anything else | `phx api METHOD /v1/...` | Authenticated escape hatch for any endpoint |
@@ -128,6 +128,12 @@ phx apps create --name "Payments API" --criticality 8 --owner fc@example.com
 phx components create --app-name "Payments API" --name backend --criticality 9
 phx components add-rules --app-name "Payments API" --name backend \
     --rules '[{"name":"repo rule","filter":{"repository":["org/payments"]}}]'
+
+# Effective exposure (INTERNAL / DMZ / EXTERNAL) per component & service:
+# the calculated value, or the declared one until Phoenix has calculated it.
+phx components list --parent-id <application-id>
+phx -o json services list --parent-id <environment-id> \
+    | jq '.[] | select(.effectiveExposure == "EXTERNAL") | .name'
 
 # Teams & users
 phx teams create --name "AppSec" --type SECURITY

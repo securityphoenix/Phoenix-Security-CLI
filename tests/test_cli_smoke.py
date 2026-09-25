@@ -52,7 +52,8 @@ def test_help_tree():
     ["assets", "remove-tags", "--help"],
     ["findings", "list", "--help"], ["findings", "enrich", "--help"],
     ["import", "file", "--help"], ["apps", "create", "--help"],
-    ["components", "add-rules", "--help"], ["teams", "auto-link", "--help"],
+    ["components", "add-rules", "--help"], ["components", "list", "--help"],
+    ["teams", "auto-link", "--help"],
     ["users", "create", "--help"],
 ])
 def test_subcommand_help(args):
@@ -205,6 +206,45 @@ def test_remove_asset_tags_command_uses_bulk_endpoint():
     assert json.loads(result.output)["results"][0]["status"] == "PROTECTED"
     assert json.loads(responses.calls[-1].request.body)["assetIds"] == [
         "a-1", "a-2"]
+
+
+def _components_page(*components):
+    return {"content": list(components), "last": True, "totalPages": 1}
+
+
+@responses.activate
+def test_list_components_returns_effective_exposure(client):
+    _mock_token(responses)
+    responses.get(f"{BASE}/v1/components", json=_components_page(
+        {"id": "c-1", "name": "backend", "effectiveExposure": "EXTERNAL"},
+        {"id": "c-2", "name": "worker", "effectiveExposure": None},
+    ))
+
+    result = client.list_components(parent_id="app-1")
+
+    assert [c["effectiveExposure"] for c in result] == ["EXTERNAL", None]
+
+
+@responses.activate
+def test_components_list_table_shows_effective_exposure():
+    _mock_token(responses)
+    responses.get(f"{BASE}/v1/components", json=_components_page(
+        {"id": "c-1", "applicationId": "app-1", "name": "backend",
+         "criticality": 9, "effectiveExposure": "DMZ", "tags": []},
+        # No calc row yet — must render blank, never fall back to INTERNAL.
+        {"id": "c-2", "applicationId": "app-1", "name": "worker",
+         "criticality": 5, "effectiveExposure": None, "tags": []},
+    ))
+
+    result = CliRunner().invoke(cli, [
+        "--client-id", "cid", "--client-secret", "secret",
+        "--api-base-url", BASE, "components", "list", "--parent-id", "app-1",
+    ])
+
+    assert result.exit_code == 0
+    assert "effectiveExposure" in result.output
+    assert "DMZ" in result.output
+    assert "INTERNAL" not in result.output
 
 
 @responses.activate
