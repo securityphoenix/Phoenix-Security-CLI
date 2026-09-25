@@ -14,7 +14,7 @@ from phoenix_cli.errors import (
     PhoenixNotSupportedError,
 )
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"
 API_VERSION = "1.27"
 
 __all__ = [
