@@ -25,7 +25,7 @@ def list_components(state, parent_id, entity_type, limit, page_size):
     """List components and services.
 
     `effectiveExposure` is the exposure Phoenix calculated (INTERNAL, DMZ or
-    EXTERNAL), not one anyone declared.
+    EXTERNAL), or the declared exposure if none has been calculated yet.
     """
     result = state.client.list_components(parent_id=parent_id,
                                           entity_type=entity_type,

@@ -231,7 +231,7 @@ def test_components_list_table_shows_effective_exposure():
     responses.get(f"{BASE}/v1/components", json=_components_page(
         {"id": "c-1", "applicationId": "app-1", "name": "backend",
          "criticality": 9, "effectiveExposure": "DMZ", "tags": []},
-        # No calc row yet — must render blank, never fall back to INTERNAL.
+        # Neither calculated nor declared — must render blank, not INTERNAL.
         {"id": "c-2", "applicationId": "app-1", "name": "worker",
          "criticality": 5, "effectiveExposure": None, "tags": []},
     ))

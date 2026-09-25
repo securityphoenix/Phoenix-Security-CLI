@@ -3147,15 +3147,15 @@ components:
         effectiveExposure:
           type: string
           nullable: true
-          # `null` is listed so 3.0 validators accept the not-yet-calculated case.
+          # `null` is listed so 3.0 validators accept the neither-calculated-nor-declared case.
           enum: [INTERNAL, EXTERNAL, DMZ, null]
           description: >-
-            Network exposure Phoenix *calculated* for this component/service —
-            not an exposure anyone declared. A component that is not deployed
-            takes it from its own assets; a deployed component takes the worst
+            Network exposure Phoenix *calculated* for this component/service,
+            or its declared exposure if none has been calculated yet. A
+            component that is not deployed takes it from its own assets; a deployed component takes the worst
             exposure of the services it runs on; a deployment-target service
-            with no assets is treated as DMZ. `null` means no calculation has
-            been persisted yet.
+            with no assets is treated as DMZ. `null` means there is neither a
+            calculated nor a declared exposure.
     ComponentsPage:
       allOf:
         - $ref: "#/components/schemas/PagedEnvelope"
