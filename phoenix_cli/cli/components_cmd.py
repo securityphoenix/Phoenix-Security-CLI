@@ -4,7 +4,8 @@ import click
 
 from phoenix_cli.cli.context import load_json_arg, pass_state, run
 
-COMPONENT_COLUMNS = ["id", "applicationId", "name", "criticality", "tags"]
+COMPONENT_COLUMNS = ["id", "applicationId", "name", "criticality",
+                     "effectiveExposure", "tags"]
 
 
 @click.group()
@@ -21,7 +22,11 @@ def components():
 @pass_state
 @run
 def list_components(state, parent_id, entity_type, limit, page_size):
-    """List components and services."""
+    """List components and services.
+
+    `effectiveExposure` is the exposure Phoenix calculated (INTERNAL, DMZ or
+    EXTERNAL), or the declared exposure if none has been calculated yet.
+    """
     result = state.client.list_components(parent_id=parent_id,
                                           entity_type=entity_type,
                                           page_size=page_size,

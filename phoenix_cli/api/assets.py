@@ -1,7 +1,7 @@
 """Assets API — search, retrieve, tag, create and enrich assets.
 
 Direct REST coverage: POST /v1/assets (search), GET /v1/assets/<id>,
-PUT /v1/assets/<id>/tags, PUT /v1/assets/tags.
+PUT/PATCH /v1/assets/<id>/tags, PUT/PATCH /v1/assets/tags.
 
 Asset CREATION and attribute ENRICHMENT have no direct CRUD endpoint in
 API v1.27 — they are implemented on top of POST /v1/import/assets (merge),
@@ -113,11 +113,15 @@ class AssetsAPI:
             "let new/merge imports close out its findings.",
         )
 
-    def remove_asset_tags(self, asset_id=None, tags=None):
-        """NOT SUPPORTED — flagged gap."""
-        raise PhoenixNotSupportedError(
-            "assets remove-tags",
-            "API v1.27 can ADD asset tags (PUT) but exposes no tag-removal "
-            "endpoint for assets (unlike applications/components).",
-            "Remove asset tags in the platform UI.",
-        )
+    def remove_asset_tags(self, tags, asset_id=None, asset_ids=None):
+        """Remove removable tag ownership from one or many assets."""
+        parsed = parse_tags(tags)
+        if asset_id:
+            return self.transport.request(
+                "PATCH", f"/v1/assets/{asset_id}/tags",
+                json_body={"tags": parsed})
+        if not asset_ids:
+            raise PhoenixConfigError("Provide asset_id or a list of asset_ids.")
+        return self.transport.request(
+            "PATCH", "/v1/assets/tags",
+            json_body={"tags": parsed, "assetIds": list(asset_ids)})
