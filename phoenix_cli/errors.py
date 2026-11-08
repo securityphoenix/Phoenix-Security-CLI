@@ -1,5 +1,9 @@
 """Error types for the Phoenix Security CLI and client library."""
 
+from __future__ import annotations
+
+import json
+
 
 class PhoenixError(Exception):
     """Base error for all Phoenix CLI failures."""
@@ -46,3 +50,24 @@ class PhoenixNotSupportedError(PhoenixError):
             msg += f"\nWorkaround: {workaround}"
         msg += "\nSee docs/GAP_ANALYSIS.md (or run: phx gaps) for the full list."
         super().__init__(msg)
+
+
+def error_body(exc: PhoenixAPIError):
+    """The error body parsed as JSON, or None when it is not JSON."""
+    body = getattr(exc, "body", None)
+    if isinstance(body, (dict, list)):
+        return body
+    if not body:
+        return None
+    try:
+        return json.loads(body)
+    except (TypeError, ValueError):
+        return None
+
+
+def error_code(exc: PhoenixAPIError) -> str | None:
+    """``body["error"]`` of an API error, or None."""
+    parsed = error_body(exc)
+    if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
+        return parsed["error"]
+    return None

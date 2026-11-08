@@ -32,6 +32,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+keyring = [
+    "keyring>=24",
+]
 dev = [
     "pytest>=7.0",
     "responses>=0.23",

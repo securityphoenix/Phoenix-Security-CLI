@@ -81,7 +81,7 @@ class Transport:
     # -- request core -------------------------------------------------------
 
     def request(self, method, path, params=None, json_body=None,
-                expect_json=True):
+                expect_json=True, headers=None):
         """Perform an authenticated request; returns decoded JSON (or None
         for empty bodies such as 204 responses)."""
         url = self.base_url + path
@@ -89,13 +89,14 @@ class Transport:
         attempt = 0
         while True:
             token = self._ensure_token()
-            headers = {
+            request_headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
             }
+            request_headers.update(headers or {})
             response = self._session.request(
                 method, url, params=params, json=json_body,
-                headers=headers, timeout=self.timeout,
+                headers=request_headers, timeout=self.timeout,
             )
 
             if response.status_code == 401 and not reauthenticated:
@@ -111,7 +112,7 @@ class Transport:
 
             if response.status_code >= 400:
                 raise PhoenixAPIError(response.status_code, _safe_text(response),
-                                      method, path)
+                                      method, path, body=response.text)
 
             if not expect_json or response.status_code == 204 or not response.content:
                 return None
