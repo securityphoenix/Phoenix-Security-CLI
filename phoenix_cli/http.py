@@ -17,6 +17,7 @@ import time
 import requests
 
 from phoenix_cli.errors import PhoenixAPIError, PhoenixAuthError
+from phoenix_cli.token_store import load_token
 
 TOKEN_PATH = "/v1/auth/access_token"
 TOKEN_REFRESH_MARGIN = 300   # refresh when <5 min validity left
@@ -24,6 +25,7 @@ MAX_RETRIES = 3
 BACKOFF_BASE = 2.0
 BACKOFF_MAX = 30.0
 RETRIABLE_STATUSES = (429, 500, 502, 503, 504)
+_LOGIN_AGAIN = 'run "phx login" again'
 
 
 class Transport:
@@ -44,11 +46,21 @@ class Transport:
         self._session.headers["User-Agent"] = user_agent
         self._token = None
         self._token_expiry = 0.0
+        # Credential order: API key (client id and secret) first, then a
+        # stored device-login token for this base URL.
+        self._login_token = False
+        if not (client_id and client_secret):
+            stored = load_token(self.base_url)
+            if stored and stored[1] > time.time():
+                self._token, self._token_expiry = stored[0], float(stored[1])
+                self._login_token = True
 
     # -- token lifecycle ----------------------------------------------------
 
     def authenticate(self):
         """Fetch a fresh access token. Returns the token metadata dict."""
+        if self._login_token:
+            return {"expiry": self._token_expiry}
         creds = f"{self._client_id}:{self._client_secret}".encode("utf-8")
         auth_header = "Basic " + base64.b64encode(creds).decode("ascii")
         response = self._session.get(
@@ -74,6 +86,10 @@ class Transport:
         return {"expiry": self._token_expiry}
 
     def _ensure_token(self):
+        if self._login_token:
+            if time.time() > self._token_expiry:
+                raise PhoenixAuthError(_LOGIN_AGAIN)
+            return self._token
         if not self._token or time.time() > (self._token_expiry - TOKEN_REFRESH_MARGIN):
             self.authenticate()
         return self._token
@@ -98,6 +114,10 @@ class Transport:
                 method, url, params=params, json=json_body,
                 headers=request_headers, timeout=self.timeout,
             )
+
+            if response.status_code == 401 and self._login_token:
+                # A login token cannot be renewed with client credentials.
+                raise PhoenixAuthError(_LOGIN_AGAIN)
 
             if response.status_code == 401 and not reauthenticated:
                 # Token invalid/expired despite local expiry check: re-auth once.

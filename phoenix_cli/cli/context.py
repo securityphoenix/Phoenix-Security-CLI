@@ -30,19 +30,22 @@ class CliState:
         self.output_format = options.get("output") or "table"
         self._client = None
 
+    def settings(self):
+        """Resolved settings (no credential check)."""
+        return load_settings(
+            client_id=self.options.get("client_id"),
+            client_secret=self.options.get("client_secret"),
+            base_url=self.options.get("api_base_url"),
+            env=self.options.get("env"),
+            config_path=self.options.get("config"),
+            timeout=self.options.get("timeout") or 60,
+            verify_tls=not self.options.get("insecure"),
+        )
+
     @property
     def client(self):
         if self._client is None:
-            settings = load_settings(
-                client_id=self.options.get("client_id"),
-                client_secret=self.options.get("client_secret"),
-                base_url=self.options.get("api_base_url"),
-                env=self.options.get("env"),
-                config_path=self.options.get("config"),
-                timeout=self.options.get("timeout") or 60,
-                verify_tls=not self.options.get("insecure"),
-            )
-            self._client = PhoenixClient.from_settings(settings)
+            self._client = PhoenixClient.from_settings(self.settings())
         return self._client
 
     def emit(self, data, columns=None):

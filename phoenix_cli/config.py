@@ -21,8 +21,10 @@ accepted:
 
 import configparser
 import os
+import time
 
 from phoenix_cli.errors import PhoenixConfigError
+from phoenix_cli.token_store import load_token
 
 # Named environments -> base URLs (Phoenix Security API v1.27)
 ENVIRONMENTS = {
@@ -63,13 +65,19 @@ class Settings:
         self.verify_tls = verify_tls
         self.config_source = config_source  # where credentials came from
 
+    def _has_login_token(self):
+        stored = load_token(self.base_url)
+        return bool(stored and stored[1] > time.time())
+
     def require_credentials(self):
-        if not self.client_id or not self.client_secret:
+        if (not self.client_id or not self.client_secret) \
+                and not self._has_login_token():
             raise PhoenixConfigError(
                 "Phoenix API credentials not found. Provide them via one of:\n"
                 "  - CLI flags:  --client-id / --client-secret\n"
                 "  - Env vars:   PHOENIX_CLIENT_ID / PHOENIX_CLIENT_SECRET\n"
                 "  - config.ini: [phoenix] client_id / client_secret\n"
+                "  - A login:    phx login\n"
                 "Credentials are created in the Phoenix UI under "
                 "Organisation > API Access."
             )

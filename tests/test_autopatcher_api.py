@@ -5,7 +5,6 @@ from __future__ import annotations
 import builtins
 import json
 import sys
-import types
 
 import pytest
 import responses
@@ -213,24 +212,8 @@ def test_no_accept_or_usage_command():
 
 # -- token store -------------------------------------------------------------
 
-class FakeKeyring(types.ModuleType):
-    def __init__(self):
-        super().__init__("keyring")
-        self.items = {}
-
-    def set_password(self, service, user, value):
-        self.items[(service, user)] = value
-
-    def get_password(self, service, user):
-        return self.items.get((service, user))
-
-    def delete_password(self, service, user):
-        self.items.pop((service, user), None)
-
-
-def test_token_store_round_trip_per_base_url(monkeypatch):
-    kr = FakeKeyring()
-    monkeypatch.setitem(sys.modules, "keyring", kr)
+def test_token_store_round_trip_per_base_url(keyring):
+    kr = keyring
     token_store.save_token("https://a.example/", "t1", 100)
     token_store.save_token("https://b.example", "t2", 200)
     assert token_store.load_token("https://a.example") == ("t1", 100)
