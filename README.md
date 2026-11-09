@@ -160,7 +160,7 @@ phx users deactivate --email leaver@example.com
 phx autopatcher lookup --hostname build-01 --ip 10.0.0.5
 phx autopatcher policy --usage server
 phx autopatcher plan get <planId>
-phx copilot plan --asset-id <assetId> --wait   # a person accepts the plan in Phoenix
+phx copilot plan --asset-id <assetId> --wait   # a person accepts it in Phoenix, or Phoenix does by policy when every action is auto and automatic acceptance is on
 phx copilot job <jobId>
 
 # Anything the CLI doesn't wrap

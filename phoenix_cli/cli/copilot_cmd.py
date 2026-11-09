@@ -21,7 +21,9 @@ def copilot():
 @pass_state
 @run
 def plan(state, asset_id, wait):
-    """Ask Copilot for a patch plan (a person still accepts it in Phoenix)."""
+    """Ask Copilot for a patch plan. A person accepts it in Phoenix, unless
+    automatic acceptance is on for the usage and every action is auto: then
+    Phoenix accepts it with no person."""
     if wait:
         try:
             result = state.client.wait_for_patch_plan(asset_id)

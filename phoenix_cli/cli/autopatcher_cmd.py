@@ -1,7 +1,8 @@
 """`phx autopatcher` — read-only autopatcher commands.
 
 There is no command that accepts a plan or sets an asset usage: a person does
-that in Phoenix.
+that in Phoenix. When an organisation turns on automatic acceptance for a
+usage, Phoenix accepts a new plan whose actions are all auto by itself.
 """
 
 from __future__ import annotations

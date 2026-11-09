@@ -1,9 +1,10 @@
 """Autopatcher API, /v1/autopatcher/**.
 
-Each method is one call to a route of the autopatcher API contract (R-1 to
-R-8 and R-14). Plan acceptance and usage confirmation belong to a person in
-Phoenix; ``accept_patch_plan`` exists only for the autopatcher's own
-interactive terminal flow.
+Each method is one call to an autopatcher route. Usage confirmation and
+accepting a plan by hand belong to a person in Phoenix; ``accept_patch_plan``
+exists only for the autopatcher's own interactive terminal flow. When an
+organisation turns on automatic acceptance for a usage, Phoenix itself
+accepts a new plan whose actions are all ``auto``, with no person.
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ class AutopatcherAPI:
 
     def lookup_asset(self, hostname: str | None = None,
                      ip: str | None = None) -> dict:
-        """R-1: assets that match a hostname and/or an IP address."""
+        """Assets that match a hostname and/or an IP address."""
         params = {}
         if hostname:
             params["hostname"] = hostname
@@ -28,30 +29,30 @@ class AutopatcherAPI:
             "GET", "/v1/autopatcher/assets/lookup", params=params or None)
 
     def set_asset_usage(self, asset_id: str, usage: str) -> dict:
-        """R-2: confirm the usage of an asset (needs a person, not an API key)."""
+        """Confirm the usage of an asset (needs a person, not an API key)."""
         return self.transport.request(
             "PUT", f"/v1/autopatcher/assets/{asset_id}/usage",
             json_body={"usage": usage})
 
     def get_patch_policy(self, usage: str) -> dict:
-        """R-3: the patch policy for a usage."""
+        """The patch policy for a usage."""
         return self.transport.request(
             "GET", "/v1/autopatcher/policy", params={"usage": usage})
 
     def submit_patch_plan(self, asset_id: str, actions: list[dict]) -> dict:
-        """R-4: submit a plan written by a model (``source`` is always llm)."""
+        """Submit a plan written by a model (``source`` is always llm)."""
         return self.transport.request(
             "POST", "/v1/autopatcher/plans",
             json_body={"assetId": asset_id, "source": "llm",
                        "actions": actions})
 
     def get_patch_plan(self, plan_id: str) -> dict:
-        """R-5: one plan with its actions and state."""
+        """One plan with its actions and state."""
         return self.transport.request(
             "GET", f"/v1/autopatcher/plans/{plan_id}")
 
     def get_latest_accepted_plan(self, asset_id: str) -> dict | None:
-        """R-6: the newest accepted, unexpired plan, or None."""
+        """The newest accepted, unexpired plan, or None."""
         try:
             return self.transport.request(
                 "GET",
@@ -62,26 +63,26 @@ class AutopatcherAPI:
             raise
 
     def list_pending_plans(self, asset_id: str) -> list[dict]:
-        """R-6b: plans of the asset that wait for acceptance."""
+        """Plans of the asset that wait for acceptance."""
         reply = self.transport.request(
             "GET", f"/v1/autopatcher/assets/{asset_id}/plans",
             params={"state": "PENDING_ACCEPTANCE"})
         return list((reply or {}).get("plans") or [])
 
     def accept_patch_plan(self, plan_id: str, plan_hash: str) -> dict:
-        """R-7: accept a plan. Used only by the autopatcher's terminal flow."""
+        """Accept a plan. Used only by the autopatcher's terminal flow."""
         return self.transport.request(
             "POST", f"/v1/autopatcher/plans/{plan_id}/accept",
             json_body={"hash": plan_hash},
             headers={"X-Autopatcher-Confirm": plan_hash[:8]})
 
     def upload_patch_run(self, record: dict) -> dict:
-        """R-8: upload the record of a run."""
+        """Upload the record of a run."""
         return self.transport.request(
             "POST", "/v1/autopatcher/runs", json_body=record)
 
     def get_autopatch_findings(self, asset_id: str) -> list[dict]:
-        """R-14: every open finding of the asset, once each, in server order."""
+        """Every open finding of the asset, once each, in server order."""
         seen: set = set()
         out: list[dict] = []
         for page in range(MAX_FINDINGS_PAGES + 1):

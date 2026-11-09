@@ -1,6 +1,6 @@
 """Copilot patch plans, /v1/copilot/**.
 
-Routes R-9 to R-11 of the autopatcher API contract. Copilot builds a plan
+Copilot patch plan routes. Copilot builds a plan
 for an asset as a background job; the client starts it, polls the job and
 reads the plan.
 """
@@ -17,7 +17,7 @@ class CopilotAPI:
 
     def start_patch_plan(self, asset_id: str, idempotency_key: str,
                          stale_copies: list[dict] | None = None) -> str:
-        """R-9: start a Copilot patch plan job; returns the job ID."""
+        """Start a Copilot patch plan job; returns the job ID."""
         reply = self.transport.request(
             "POST", "/v1/copilot/patch-plans",
             json_body={"assetId": asset_id,
@@ -26,11 +26,11 @@ class CopilotAPI:
         return reply["jobId"]
 
     def get_job(self, job_id: str) -> dict:
-        """R-10: state of a Copilot job."""
+        """State of a Copilot job."""
         return self.transport.request("GET", f"/v1/copilot/jobs/{job_id}")
 
     def get_copilot_patch_plan(self, plan_id: str) -> dict:
-        """R-11: a plan written by Copilot."""
+        """A plan written by Copilot."""
         return self.transport.request(
             "GET", f"/v1/copilot/patch-plans/{plan_id}")
 
@@ -38,7 +38,7 @@ class CopilotAPI:
                             stale_copies: list[dict] | None = None,
                             timeout_s: int = 900, poll_s: int = 5,
                             sleep=time.sleep) -> dict:
-        """Start a job, wait for it, and return the plan (R-11).
+        """Start a job, wait for it, and return the plan.
 
         Raises ``PhoenixError`` when the job fails and ``TimeoutError`` after
         ``timeout_s`` seconds of waiting.
