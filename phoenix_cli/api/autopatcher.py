@@ -39,11 +39,21 @@ class AutopatcherAPI:
         return self.transport.request(
             "GET", "/v1/autopatcher/policy", params={"usage": usage})
 
-    def submit_patch_plan(self, asset_id: str, actions: list[dict]) -> dict:
-        """Submit a plan written by a model (``source`` is always llm)."""
+    def submit_patch_plan(self, asset_id: str, actions: list[dict], *,
+                          source: str = "llm") -> dict:
+        """Submit a plan written by a model.
+
+        ``source`` is ``llm`` (default: a model inside a program, which an
+        organisation may let Phoenix accept by policy) or ``mcp`` (an agent
+        wrote it through an MCP server: Phoenix never accepts it by policy).
+        Any other value raises ``ValueError`` before a request is made.
+        """
+        if source not in ("llm", "mcp"):
+            raise ValueError(
+                f"source must be 'llm' or 'mcp', got {source!r}")
         return self.transport.request(
             "POST", "/v1/autopatcher/plans",
-            json_body={"assetId": asset_id, "source": "llm",
+            json_body={"assetId": asset_id, "source": source,
                        "actions": actions})
 
     def get_patch_plan(self, plan_id: str) -> dict:

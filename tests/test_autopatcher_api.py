@@ -116,6 +116,26 @@ def test_submit_plan_forces_source_llm(client):
 
 
 @responses.activate
+def test_submit_plan_source_mcp_is_sent(client):
+    _mock_token(responses)
+    actions = [{"id": "a1"}]
+    responses.post(f"{AP}/plans", json={"planId": "p1"},
+                   match=[matchers.json_params_matcher(
+                       {"assetId": "a1", "source": "mcp", "actions": actions})])
+    assert client.submit_patch_plan("a1", actions, source="mcp") == {"planId": "p1"}
+
+
+@responses.activate
+@pytest.mark.parametrize("bad", ["copilot", "", "LLM", None])
+def test_submit_plan_rejects_other_sources_without_a_request(client, bad):
+    _mock_token(responses)
+    with pytest.raises(ValueError, match="source must be 'llm' or 'mcp'"):
+        client.submit_patch_plan("a1", [], source=bad)
+    assert not [c for c in responses.calls if c.request.method == "POST"
+                and c.request.url.endswith("/plans")]
+
+
+@responses.activate
 def test_get_plan_and_pending_list(client):
     _mock_token(responses)
     responses.get(f"{AP}/plans/p1", json={"planId": "p1"})
