@@ -32,7 +32,10 @@ def _clean_env(monkeypatch, tmp_path):
                 "PHOENIX_API_BASE_URL", "PHOENIX_BASE_URL", "CLIENT_ID",
                 "CLIENT_SECRET", "PHOENIX_DOMAIN"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.delitem(sys.modules, "keyring", raising=False)
+    # Never reach the real OS keychain: a None entry makes `import keyring`
+    # raise ImportError whether or not the extra is installed. Tests that need
+    # a keyring request the in-memory `keyring` fixture, which replaces this.
+    monkeypatch.setitem(sys.modules, "keyring", None)
     monkeypatch.chdir(tmp_path)
 
 
@@ -141,7 +144,8 @@ def test_login_command_stores_token_and_never_prints_it(keyring):
 
 
 @responses.activate
-def test_login_without_keyring_fails_clearly():
+def test_login_without_keyring_fails_clearly(monkeypatch):
+    monkeypatch.setitem(sys.modules, "keyring", None)  # explicit: absent
     responses.post(CODE, json=GRANT)
     responses.post(TOKEN, json={"access_token": "SECRET-TOK", "expires_in": 3600})
     result = CliRunner().invoke(cli, ["--api-base-url", BASE, "login"])
