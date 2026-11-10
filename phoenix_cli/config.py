@@ -21,7 +21,9 @@ accepted:
 
 import configparser
 import os
+import sys
 import time
+from urllib.parse import urlsplit
 
 from phoenix_cli.errors import PhoenixConfigError
 from phoenix_cli.token_store import load_token
@@ -51,6 +53,33 @@ DEFAULT_CONFIG_PATHS = (
     os.path.join("~", ".config", "phoenix", "config.ini"),
     os.path.join("~", ".phoenix", "config.ini"),
 )
+
+
+LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1")
+
+
+def is_secure_base_url(url):
+    """True for https, or http to a loopback host (local development)."""
+    try:
+        parts = urlsplit(url or "")
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        return False
+    if parts.scheme == "https":
+        return bool(host)
+    return parts.scheme == "http" and host in LOCAL_HOSTS
+
+
+def require_secure_base_url(url):
+    """Refuse a base URL that would send credentials in clear text."""
+    if not is_secure_base_url(url):
+        raise PhoenixConfigError(
+            f"Refusing base URL {url!r}: it is not https. The device code, "
+            "access token and API credentials would be sent in clear text. "
+            "Use an https:// URL (http:// is allowed only for localhost, "
+            "127.0.0.1 and [::1])."
+        )
+    return url
 
 
 class Settings:
@@ -128,6 +157,17 @@ def load_settings(client_id=None, client_secret=None, base_url=None, env=None,
         raise PhoenixConfigError(f"Config file not found: {config_path}")
 
     ini_get = ini.get
+    ini_base_url = _first(ini_get, _INI_BASE_URL)
+    # A ./config.ini is picked up from the current directory without being
+    # asked for. When it is what sets the base URL, say so: a hostile
+    # directory could otherwise redirect the CLI (and its credentials).
+    if (not config_path and config_source == "config.ini" and ini_base_url
+            and not (base_url or env_base_url
+                     or _first(os.environ.get, _ENV_BASE_URL))):
+        print(f"warning: using api_base_url {ini_base_url} from "
+              f"{os.path.abspath(config_source)} (current directory). "
+              "Pass --api-base-url or --config to be explicit.",
+              file=sys.stderr)
 
     resolved_client_id = (
         client_id
@@ -143,7 +183,7 @@ def load_settings(client_id=None, client_secret=None, base_url=None, env=None,
         base_url
         or env_base_url
         or _first(os.environ.get, _ENV_BASE_URL)
-        or _first(ini_get, _INI_BASE_URL)
+        or ini_base_url
         or DEFAULT_BASE_URL
     )
 

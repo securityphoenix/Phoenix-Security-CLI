@@ -21,8 +21,8 @@ BASE = "https://api.demo.appsecphx.io"
 CODE = f"{BASE}/v1/auth/device/code"
 TOKEN = f"{BASE}/v1/auth/device/token"
 GRANT = {"device_code": "dc", "user_code": "ABCD-EFGH",
-         "verification_uri": "https://app/device",
-         "verification_uri_complete": "https://app/device?c=ABCD-EFGH",
+         "verification_uri": f"{BASE}/device",
+         "verification_uri_complete": f"{BASE}/device?c=ABCD-EFGH",
          "expires_in": 900, "interval": 5}
 
 
@@ -52,7 +52,7 @@ def test_device_login_polls_until_token():
     assert token == "tok" and sleeps == [5, 10]  # interval 5, +5 after slow_down
     assert abs(exp - (time.time() + 3600)) < 5
     assert any("ABCD-EFGH" in line for line in lines)
-    assert any("https://app/device?c=ABCD-EFGH" in line for line in lines)
+    assert any(f"{BASE}/device?c=ABCD-EFGH" in line for line in lines)
     assert not any("tok" == line.strip() for line in lines)
 
 
@@ -152,3 +152,166 @@ def test_login_without_keyring_fails_clearly(monkeypatch):
     assert result.exit_code != 0
     assert "phoenix-security-cli[keyring]" in result.output
     assert "SECRET-TOK" not in result.output
+
+
+# -- AC-4: transport security, settings, link and cwd config ------------------
+
+@responses.activate
+@pytest.mark.parametrize("url", ["http://api.example.com", "ftp://x",
+                                 "http://localhost.evil.test", "api.example.com"])
+def test_device_login_refuses_non_https_with_no_network(url):
+    with pytest.raises(PhoenixConfigError, match="not https"):
+        device_login(url, "phx", sleep=lambda s: None, echo=lambda s: None)
+    assert len(responses.calls) == 0
+
+
+@pytest.mark.parametrize("url", ["http://api.example.com",
+                                 "http://user:pw@evil.test"])
+def test_transport_refuses_non_https(url):
+    with pytest.raises(PhoenixConfigError, match="clear text"):
+        Transport("cid", "sec", url)
+
+
+@responses.activate
+@pytest.mark.parametrize("host", ["localhost:8080", "127.0.0.1:8080", "[::1]:8080"])
+def test_local_http_is_allowed(host):
+    base = f"http://{host}"
+    responses.post(f"{base}/v1/auth/device/code",
+                   json=dict(GRANT, verification_uri_complete=f"{base}/device?c=1"))
+    responses.post(f"{base}/v1/auth/device/token",
+                   json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    token, _ = device_login(base, "phx", sleep=lambda s: None, echo=lines.append)
+    assert token == "tok"
+    assert any(f"{base}/device?c=1" in line for line in lines)
+    Transport("cid", "sec", base)  # no error
+
+
+@responses.activate
+def test_device_flow_uses_settings_timeout_verify_and_proxy(monkeypatch):
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    responses.post(CODE, json=GRANT)
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lambda s: None,
+                 timeout=7, verify_tls=False)
+    assert len(responses.calls) == 2
+    for call in responses.calls:
+        kwargs = call.request.req_kwargs
+        assert kwargs["timeout"] == 7
+        assert kwargs["verify"] is False
+        assert kwargs["proxies"].get("https") == "http://proxy.test:3128"
+
+
+@responses.activate
+def test_login_command_passes_timeout_and_insecure(keyring):
+    responses.post(CODE, json=GRANT)
+    responses.post(TOKEN, json={"access_token": "t", "expires_in": 3600})
+    result = CliRunner().invoke(cli, ["--api-base-url", BASE, "--timeout", "9",
+                                      "--insecure", "login"])
+    assert result.exit_code == 0, result.output
+    assert responses.calls[0].request.req_kwargs["timeout"] == 9
+    assert responses.calls[0].request.req_kwargs["verify"] is False
+
+
+@responses.activate
+@pytest.mark.parametrize("link", [
+    "https://evil.test/approve",
+    "javascript:alert(1)",
+    f"{BASE.replace('https', 'http')}/device",
+    f"{BASE}/device\x1b[31m",
+    f"{BASE}/device with space",
+    "https://api.demo.appsecphx.io.evil.test/device",
+])
+def test_hostile_verification_uri_is_not_printed(link):
+    responses.post(CODE, json=dict(GRANT, verification_uri_complete=link,
+                                   verification_uri=link))
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
+    text = "\n".join(lines)
+    assert link not in text and "\x1b" not in text
+    assert "evil.test" not in text and "javascript" not in text
+    assert BASE in text and "ABCD-EFGH" in text  # safe fallback + code
+
+
+@responses.activate
+def test_plain_verification_uri_used_when_complete_is_hostile():
+    responses.post(CODE, json=dict(GRANT,
+                                   verification_uri_complete="https://evil.test/x"))
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
+    assert any(line.strip() == f"{BASE}/device" for line in lines)
+    assert not any("evil.test" in line for line in lines)
+
+
+@responses.activate
+def test_user_code_control_characters_are_stripped():
+    responses.post(CODE, json=dict(GRANT, user_code="AB\x1b[2JCD"))
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
+    assert not any("\x1b" in line for line in lines)
+    assert any("AB[2JCD" in line for line in lines)
+
+
+def test_cwd_config_base_url_warns_on_stderr(tmp_path, capsys):
+    (tmp_path / "config.ini").write_text(
+        "[phoenix]\napi_base_url=https://attacker.test\n")
+    settings = load_settings()
+    assert settings.base_url == "https://attacker.test"  # documented behaviour kept
+    err = capsys.readouterr().err
+    assert "config.ini" in err and "https://attacker.test" in err
+
+
+def test_cwd_config_without_base_url_is_silent(tmp_path, capsys):
+    (tmp_path / "config.ini").write_text("[phoenix]\nclient_id=a\n")
+    load_settings()
+    assert capsys.readouterr().err == ""
+
+
+def test_cwd_config_warning_skipped_when_flag_or_env_sets_url(tmp_path, capsys,
+                                                              monkeypatch):
+    (tmp_path / "config.ini").write_text(
+        "[phoenix]\napi_base_url=https://attacker.test\n")
+    assert load_settings(base_url=BASE).base_url == BASE
+    monkeypatch.setenv("PHOENIX_API_BASE_URL", BASE)
+    assert load_settings().base_url == BASE
+    assert capsys.readouterr().err == ""
+
+
+# -- AC-4 follow-up: web app host differs from API host -----------------------
+
+@responses.activate
+@pytest.mark.parametrize("link", [
+    "https://demo.appsecphx.io/app/device?user_code=X",
+    "https://app.demo.appsecphx.io/app/device",
+    "https://api.demo.appsecphx.io/app/device",
+])
+def test_web_app_link_on_tenant_domain_is_printed(link):
+    responses.post(CODE, json=dict(GRANT, verification_uri_complete=link))
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
+    assert any(line.strip() == link for line in lines)
+
+
+@responses.activate
+@pytest.mark.parametrize("link", [
+    "https://evil.test/app/device",
+    "https://appsecphx.io.evil.test/app/device",
+    "https://appsecphx.io@evil.test/app/device",
+    "https://api.demo.appsecphx.io@evil.test/app/device",
+    "https://user:pw@demo.appsecphx.io/app/device",
+    "https://demo.appsecphx.io:8443/app/device",
+    "https://notdemo.appsecphx.io/app/device",
+    "https://appsecphx.io/app/device",
+])
+def test_hostile_or_odd_link_near_tenant_domain_is_refused(link):
+    responses.post(CODE, json=dict(GRANT, verification_uri_complete=link,
+                                   verification_uri=link))
+    responses.post(TOKEN, json={"access_token": "tok", "expires_in": 60})
+    lines = []
+    device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
+    assert not any(link in line for line in lines)
+    assert not any("evil.test" in line for line in lines)

@@ -20,8 +20,11 @@ def login(state, client_name):
     The token goes to the operating system keychain. It is never printed.
     Needs: pip install "phoenix-security-cli[keyring]".
     """
-    base_url = state.settings().base_url
-    token, expires_at = device_login(base_url, client_name)
+    settings = state.settings()
+    base_url = settings.base_url
+    token, expires_at = device_login(base_url, client_name,
+                                     timeout=settings.timeout,
+                                     verify_tls=settings.verify_tls)
     try:
         token_store.save_token(base_url, token, expires_at)
     except RuntimeError as exc:

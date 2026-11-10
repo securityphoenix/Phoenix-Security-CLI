@@ -16,6 +16,7 @@ import time
 
 import requests
 
+from phoenix_cli.config import require_secure_base_url
 from phoenix_cli.errors import PhoenixAPIError, PhoenixAuthError
 from phoenix_cli.token_store import load_token
 
@@ -37,6 +38,7 @@ class Transport:
 
     def __init__(self, client_id, client_secret, base_url, timeout=60,
                  verify_tls=True, user_agent="phoenix-security-cli"):
+        require_secure_base_url(base_url)
         self._client_id = client_id
         self._client_secret = client_secret
         self.base_url = base_url.rstrip("/")
