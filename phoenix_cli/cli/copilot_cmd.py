@@ -28,7 +28,7 @@ def plan(state, asset_id, wait):
         try:
             result = state.client.wait_for_patch_plan(asset_id)
         except TimeoutError as exc:
-            raise click.ClickException(str(exc))
+            raise click.ClickException(str(exc)) from exc
         state.emit(result)
     else:
         job_id = state.client.start_patch_plan(asset_id, str(uuid.uuid4()))

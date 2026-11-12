@@ -175,6 +175,7 @@ def test_login_without_keyring_fails_clearly(monkeypatch):
     assert result.exit_code != 0
     assert "phoenix-security-cli[keyring]" in result.output
     assert "SECRET-TOK" not in result.output
+    assert len(responses.calls) == 0  # no login was issued to approve
 
 
 # -- AC-4: transport security, settings, link and cwd config ------------------
@@ -358,3 +359,70 @@ def test_non_numeric_token_expiry_is_phoenix_error():
     responses.post(TOKEN, json={"access_token": "t", "expires_in": "soon"})
     with pytest.raises(PhoenixAPIError):
         device_login(BASE, "phx", sleep=lambda s: None, echo=lambda s: None)
+
+
+# -- keychain backend, logout, token export -------------------------------------
+
+def _backend(module, name="Keyring"):
+    return type(name, (), {"__module__": module})()
+
+
+class _Chain:
+    def __init__(self, *backends):
+        self.backends = list(backends)
+
+
+@pytest.mark.parametrize("backend", [
+    _backend("keyrings.alt.file", "PlaintextKeyring"),
+    _backend("keyring.backends.null"),
+    _backend("keyring.backends.fail"),
+    _Chain(_backend("keyrings.alt.file", "PlaintextKeyring"),
+           _backend("keyring.backends.macOS")),
+    _Chain(),
+])
+def test_save_token_refuses_a_file_or_null_backend(keyring, backend):
+    keyring.get_keyring = lambda: backend
+    with pytest.raises(RuntimeError, match="keychain"):
+        token_store.save_token(BASE, "SECRET-TOK", int(time.time()) + 60)
+    assert keyring.items == {}
+
+
+@pytest.mark.parametrize("backend", [
+    _backend("keyring.backends.macOS"),
+    _Chain(_backend("keyring.backends.SecretService"),
+           _backend("keyrings.alt.file", "PlaintextKeyring")),
+])
+def test_save_token_accepts_an_os_keychain(keyring, backend):
+    keyring.get_keyring = lambda: backend
+    token_store.save_token(BASE, "t", int(time.time()) + 60)
+    assert token_store.load_token(BASE)[0] == "t"
+
+
+def test_clear_token_reports_a_failed_delete(keyring):
+    token_store.save_token(BASE, "t", int(time.time()) + 60)
+
+    def locked(service, user):
+        raise OSError("keychain locked")
+
+    keyring.delete_password = locked
+    with pytest.raises(RuntimeError, match="could not remove"):
+        token_store.clear_token(BASE)
+    out = CliRunner().invoke(cli, ["--api-base-url", BASE, "logout"])
+    assert out.exit_code != 0 and "Logged out" not in out.output
+
+
+def test_clear_token_treats_an_absent_entry_as_success(keyring):
+    def absent(service, user):
+        raise KeyError("not found")
+
+    keyring.delete_password = absent
+    token_store.clear_token(BASE)  # nothing stored: no error
+    out = CliRunner().invoke(cli, ["--api-base-url", BASE, "logout"])
+    assert out.exit_code == 0 and "Logged out" in out.output
+
+
+def test_auth_token_never_prints_a_stored_login(keyring):
+    token_store.save_token(BASE, "LOGIN-SECRET", int(time.time()) + 3600)
+    result = CliRunner().invoke(cli, ["--api-base-url", BASE, "auth", "token"])
+    assert result.exit_code != 0
+    assert "LOGIN-SECRET" not in result.output

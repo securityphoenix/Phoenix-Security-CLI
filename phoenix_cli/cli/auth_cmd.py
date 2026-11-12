@@ -26,5 +26,9 @@ def token(state):
 
     Note: the token is printed to stdout — avoid pasting it into logs.
     """
+    if getattr(state.client.transport, "_login_token", False):
+        raise click.ClickException(
+            "A stored login is never printed. Use an API key (client id and "
+            "secret) to mint a token.")
     state.client.transport.authenticate()
     click.echo(state.client.transport._token)
