@@ -40,14 +40,15 @@ class CopilotAPI:
     def wait_for_patch_plan(self, asset_id: str, *,
                             stale_copies: list[dict] | None = None,
                             timeout_s: int = 900, poll_s: int = 5,
-                            sleep=time.sleep) -> dict:
+                            sleep=time.sleep, clock=time.monotonic) -> dict:
         """Start a job, wait for it, and return the plan.
 
         Raises ``PhoenixError`` when the job fails and ``TimeoutError`` after
-        ``timeout_s`` seconds of waiting.
+        ``timeout_s`` seconds, counted from the start with a monotonic clock so
+        the time spent in requests and retries counts too.
         """
         job_id = self.start_patch_plan(asset_id, str(uuid.uuid4()), stale_copies)
-        waited = 0
+        deadline = clock() + timeout_s
         while True:
             job = expect_mapping(self.get_job(job_id), "the job")
             state = job.get("state")
@@ -59,8 +60,11 @@ class CopilotAPI:
             if state == "FAILED":
                 raise PhoenixError(
                     f"Copilot could not build a plan: {job.get('error') or 'unknown error'}")
-            if waited >= timeout_s:
+            remaining = deadline - clock()
+            if remaining <= 0:
                 raise TimeoutError(
                     f"Copilot job {job_id} did not finish within {timeout_s} seconds")
-            sleep(poll_s)
-            waited += poll_s
+            sleep(min(poll_s, remaining))
+            if clock() >= deadline:
+                raise TimeoutError(
+                    f"Copilot job {job_id} did not finish within {timeout_s} seconds")

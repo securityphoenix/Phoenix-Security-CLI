@@ -91,7 +91,7 @@ def _json(response) -> dict:
 
 
 def device_login(base_url: str, client_name: str, *, sleep=time.sleep,
-                 echo=click.echo, timeout: int = 30,
+                 clock=time.monotonic, echo=click.echo, timeout: int = 30,
                  verify_tls: bool = True, session=None) -> tuple[str, int]:
     """Run the device flow; returns ``(token, expires_at)`` (unix seconds).
 
@@ -132,7 +132,7 @@ def device_login(base_url: str, client_name: str, *, sleep=time.sleep,
              "the code to approve the login.")
     echo(f"Code: {_clean(user_code)}")
 
-    waited = 0
+    deadline = clock() + expires_in
     while True:
         reply = _post(session, base_url, TOKEN_PATH, {"device_code": device_code}, timeout)
         data = _json(reply)
@@ -156,7 +156,9 @@ def device_login(base_url: str, client_name: str, *, sleep=time.sleep,
         else:
             raise PhoenixAPIError(reply.status_code, reply.text[:500],
                                   "POST", TOKEN_PATH, body=reply.text)
-        if waited >= expires_in:
+        remaining = deadline - clock()
+        if remaining <= 0:
             raise PhoenixAuthError("The login code expired. Run \"phx login\" again.")
-        sleep(interval)
-        waited += interval
+        sleep(min(interval, remaining))
+        if clock() >= deadline:
+            raise PhoenixAuthError("The login code expired. Run \"phx login\" again.")

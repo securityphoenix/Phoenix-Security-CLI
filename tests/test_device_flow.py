@@ -70,8 +70,30 @@ def test_device_login_terminal_errors_raise(error):
 def test_device_login_gives_up_after_expires_in():
     responses.post(CODE, json=dict(GRANT, expires_in=10))
     responses.post(TOKEN, status=400, json={"error": "authorization_pending"})
+    now = [0.0]
     with pytest.raises(PhoenixAuthError, match="expired"):
-        device_login(BASE, "phx", sleep=lambda s: None, echo=lambda s: None)
+        device_login(BASE, "phx", sleep=lambda s: now.__setitem__(0, now[0] + s),
+                     clock=lambda: now[0], echo=lambda s: None)
+
+
+@responses.activate
+def test_device_login_expiry_counts_request_time():
+    """Slow token replies use up the grant: no poll after it has expired."""
+    now = [0.0]
+    polls = []
+
+    def slow_pending(request):
+        polls.append(now[0])
+        now[0] += 6  # each token request takes six seconds
+        return 400, {}, '{"error": "authorization_pending"}'
+
+    responses.post(CODE, json=dict(GRANT, expires_in=10))
+    responses.add_callback(responses.POST, TOKEN, callback=slow_pending,
+                           content_type="application/json")
+    with pytest.raises(PhoenixAuthError, match="expired"):
+        device_login(BASE, "phx", sleep=lambda s: now.__setitem__(0, now[0] + s),
+                     clock=lambda: now[0], echo=lambda s: None)
+    assert polls == [0.0]  # the 10 s grant is spent by 6 s request + 4 s wait
 
 
 # -- transport ---------------------------------------------------------------

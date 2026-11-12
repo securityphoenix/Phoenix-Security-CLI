@@ -77,11 +77,40 @@ def test_wait_for_patch_plan_returns_actions(client):
 def test_wait_for_patch_plan_times_out(client):
     responses.post(f"{CP}/patch-plans", json={"jobId": "j1"})
     responses.get(f"{CP}/jobs/j1", json={"state": "RUNNING"})
-    sleeps = []
+    sleeps, now = [], [0.0]
+
+    def sleep(s):
+        sleeps.append(s)
+        now[0] += s
+
     with pytest.raises(TimeoutError):
         client.wait_for_patch_plan("a1", timeout_s=10, poll_s=5,
-                                   sleep=sleeps.append)
+                                   sleep=sleep, clock=lambda: now[0])
     assert sleeps == [5, 5]
+
+
+@responses.activate
+def test_wait_for_patch_plan_timeout_counts_request_time(client):
+    """Slow job replies use up the budget: sleeps shrink, no poll after it."""
+    now, polls, sleeps = [0.0], [], []
+
+    def slow_running(request):
+        polls.append(now[0])
+        now[0] += 6  # each job request takes six seconds
+        return 200, {}, '{"state": "RUNNING"}'
+
+    responses.post(f"{CP}/patch-plans", json={"jobId": "j1"})
+    responses.add_callback(responses.GET, f"{CP}/jobs/j1", callback=slow_running,
+                           content_type="application/json")
+
+    def sleep(s):
+        sleeps.append(s)
+        now[0] += s
+
+    with pytest.raises(TimeoutError):
+        client.wait_for_patch_plan("a1", timeout_s=10, poll_s=5,
+                                   sleep=sleep, clock=lambda: now[0])
+    assert polls == [0.0] and sleeps == [4]
 
 
 @responses.activate
