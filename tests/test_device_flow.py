@@ -14,7 +14,8 @@ from phoenix_cli import PhoenixClient, token_store
 from phoenix_cli.cli.main import cli
 from phoenix_cli.config import load_settings
 from phoenix_cli.device_flow import device_login
-from phoenix_cli.errors import PhoenixAuthError, PhoenixConfigError
+from phoenix_cli.errors import (PhoenixAPIError, PhoenixAuthError,
+                                 PhoenixConfigError)
 from phoenix_cli.http import Transport
 
 BASE = "https://api.demo.appsecphx.io"
@@ -315,3 +316,23 @@ def test_hostile_or_odd_link_near_tenant_domain_is_refused(link):
     device_login(BASE, "phx", sleep=lambda s: None, echo=lines.append)
     assert not any(link in line for line in lines)
     assert not any("evil.test" in line for line in lines)
+
+
+# -- malformed grant and token replies ----------------------------------------
+
+@responses.activate
+@pytest.mark.parametrize("grant", [
+    {}, {"user_code": "A-B"}, {"device_code": "d"},
+    dict(GRANT, interval="soon"), dict(GRANT, expires_in="x")])
+def test_malformed_grant_is_phoenix_error(grant):
+    responses.post(CODE, json=grant)
+    with pytest.raises(PhoenixAPIError):
+        device_login(BASE, "phx", sleep=lambda s: None, echo=lambda s: None)
+
+
+@responses.activate
+def test_non_numeric_token_expiry_is_phoenix_error():
+    responses.post(CODE, json=GRANT)
+    responses.post(TOKEN, json={"access_token": "t", "expires_in": "soon"})
+    with pytest.raises(PhoenixAPIError):
+        device_login(BASE, "phx", sleep=lambda s: None, echo=lambda s: None)

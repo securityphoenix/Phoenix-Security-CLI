@@ -107,9 +107,20 @@ def device_login(base_url: str, client_name: str, *, sleep=time.sleep,
         raise PhoenixAPIError(response.status_code, response.text[:500],
                               "POST", CODE_PATH, body=response.text)
     grant = _json(response)
-    device_code = grant["device_code"]
-    interval = int(grant.get("interval") or DEFAULT_INTERVAL)
-    expires_in = int(grant.get("expires_in") or DEFAULT_EXPIRES_IN)
+    device_code = grant.get("device_code")
+    user_code = grant.get("user_code")
+    if not isinstance(device_code, str) or not device_code \
+            or not isinstance(user_code, str) or not user_code:
+        raise PhoenixAPIError(response.status_code,
+                              "The login grant is missing a device or user code.",
+                              "POST", CODE_PATH)
+    try:
+        interval = int(grant.get("interval") or DEFAULT_INTERVAL)
+        expires_in = int(grant.get("expires_in") or DEFAULT_EXPIRES_IN)
+    except (TypeError, ValueError):
+        raise PhoenixAPIError(response.status_code,
+                              "The login grant has a non-numeric interval or expiry.",
+                              "POST", CODE_PATH) from None
     link = _link_to_show(base_url, grant)
     if link:
         echo("Open this link in your browser and approve the login:")
@@ -119,14 +130,19 @@ def device_login(base_url: str, client_name: str, *, sleep=time.sleep,
              f"{_clean(base_url)}, so it is not shown.")
         echo(f"Open {_clean(base_url.rstrip('/'))} in your browser and enter "
              "the code to approve the login.")
-    echo(f"Code: {_clean(grant['user_code'])}")
+    echo(f"Code: {_clean(user_code)}")
 
     waited = 0
     while True:
         reply = _post(session, base_url, TOKEN_PATH, {"device_code": device_code}, timeout)
         data = _json(reply)
         if reply.status_code == 200 and data.get("access_token"):
-            token_expires_in = int(data.get("expires_in") or 3600)
+            try:
+                token_expires_in = int(data.get("expires_in") or 3600)
+            except (TypeError, ValueError):
+                raise PhoenixAPIError(reply.status_code,
+                                      "The login token has a non-numeric expiry.",
+                                      "POST", TOKEN_PATH) from None
             return data["access_token"], int(time.time()) + token_expires_in
         error = data.get("error")
         if error == "authorization_pending":

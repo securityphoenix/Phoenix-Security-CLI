@@ -1,6 +1,7 @@
 """Autopatcher API, /v1/autopatcher/**.
 
-Each method is one call to an autopatcher route. Usage confirmation and
+Each method is one call to an autopatcher route, except
+``get_autopatch_findings``, which pages through the findings (up to 21 calls). Usage confirmation and
 accepting a plan by hand belong to a person in Phoenix; ``accept_patch_plan``
 exists only for the autopatcher's own interactive terminal flow. When an
 organisation turns on automatic acceptance for a usage, Phoenix itself
@@ -9,7 +10,8 @@ accepts a new plan whose actions are all ``auto``, with no person.
 
 from __future__ import annotations
 
-from phoenix_cli.errors import PhoenixAPIError, error_code
+from phoenix_cli.errors import (PhoenixAPIError, PhoenixError, error_code,
+                                 expect_mapping)
 
 FINDINGS_PAGE_SIZE = 1000
 MAX_FINDINGS_PAGES = 20
@@ -77,7 +79,8 @@ class AutopatcherAPI:
         reply = self.transport.request(
             "GET", f"/v1/autopatcher/assets/{asset_id}/plans",
             params={"state": "PENDING_ACCEPTANCE"})
-        return list((reply or {}).get("plans") or [])
+        reply = expect_mapping({} if reply is None else reply, "the pending plans")
+        return list(reply.get("plans") or [])
 
     def accept_patch_plan(self, plan_id: str, plan_hash: str) -> dict:
         """Accept a plan. Used only by the autopatcher's terminal flow."""
@@ -99,7 +102,10 @@ class AutopatcherAPI:
             reply = self.transport.request(
                 "GET", f"/v1/autopatcher/assets/{asset_id}/findings",
                 params={"page": page, "size": FINDINGS_PAGE_SIZE})
-            items = (reply or {}).get("findings") or []
+            reply = expect_mapping({} if reply is None else reply, "the findings")
+            items = reply.get("findings") or []
+            if not all(isinstance(item, dict) for item in items):
+                raise PhoenixError("Unexpected response from Phoenix for the findings")
             if page == MAX_FINDINGS_PAGES and items:
                 raise ValueError("too many findings")
             for item in items:

@@ -10,7 +10,7 @@ from __future__ import annotations
 import time
 import uuid
 
-from phoenix_cli.errors import PhoenixError
+from phoenix_cli.errors import PhoenixError, expect_mapping
 
 
 class CopilotAPI:
@@ -23,7 +23,10 @@ class CopilotAPI:
             json_body={"assetId": asset_id,
                        "staleCopies": list(stale_copies or [])},
             headers={"Idempotency-Key": idempotency_key})
-        return reply["jobId"]
+        job_id = expect_mapping(reply, "the new job").get("jobId")
+        if not job_id:
+            raise PhoenixError("Unexpected response from Phoenix: no job ID")
+        return job_id
 
     def get_job(self, job_id: str) -> dict:
         """State of a Copilot job."""
@@ -46,9 +49,12 @@ class CopilotAPI:
         job_id = self.start_patch_plan(asset_id, str(uuid.uuid4()), stale_copies)
         waited = 0
         while True:
-            job = self.get_job(job_id)
+            job = expect_mapping(self.get_job(job_id), "the job")
             state = job.get("state")
             if state == "DONE":
+                if not job.get("planId"):
+                    raise PhoenixError(
+                        "Unexpected response from Phoenix: job is done but has no plan ID")
                 return self.get_copilot_patch_plan(job["planId"])
             if state == "FAILED":
                 raise PhoenixError(

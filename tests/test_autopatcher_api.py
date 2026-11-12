@@ -13,7 +13,7 @@ from responses import matchers
 
 from phoenix_cli import PhoenixClient, token_store
 from phoenix_cli.cli.main import cli
-from phoenix_cli.errors import PhoenixAPIError, error_code
+from phoenix_cli.errors import PhoenixAPIError, PhoenixError, error_code
 
 BASE = "https://api.demo.appsecphx.io"
 AP = f"{BASE}/v1/autopatcher"
@@ -260,3 +260,21 @@ def test_token_store_refuses_plain_file(monkeypatch, tmp_path):
         token_store.save_token("https://a.example", "secret-token", 1)
     assert token_store.load_token("https://a.example") is None
     assert list(tmp_path.iterdir()) == []  # nothing written to disk
+
+
+@responses.activate
+@pytest.mark.parametrize("body", [[], "text", [1]])
+def test_pending_plans_non_mapping_reply_is_phoenix_error(client, body):
+    _mock_token(responses)
+    responses.get(f"{AP}/assets/a1/plans", json=body)
+    with pytest.raises(PhoenixError):
+        client.list_pending_plans("a1")
+
+
+@responses.activate
+@pytest.mark.parametrize("body", [[], {"findings": ["x"]}])
+def test_findings_malformed_reply_is_phoenix_error(client, body):
+    _mock_token(responses)
+    responses.get(f"{AP}/assets/a1/findings", json=body)
+    with pytest.raises(PhoenixError):
+        client.get_autopatch_findings("a1")

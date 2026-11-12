@@ -112,3 +112,22 @@ def test_cli_copilot_job(client):
         "--client-id", "cid", "--client-secret", "s", "--api-base-url", BASE,
         "-o", "json", "copilot", "job", "j1"])
     assert result.exit_code == 0 and json.loads(result.output) == {"state": "DONE"}
+
+
+# -- malformed replies stay inside PhoenixError -------------------------------
+
+@responses.activate
+@pytest.mark.parametrize("body", [[], {}, {"jobId": ""}])
+def test_start_patch_plan_malformed_reply_is_phoenix_error(client, body):
+    responses.post(f"{CP}/patch-plans", json=body)
+    with pytest.raises(PhoenixError):
+        client.start_patch_plan("a1", "key")
+
+
+@responses.activate
+@pytest.mark.parametrize("job", [["x"], {"state": "DONE"}])
+def test_wait_for_patch_plan_malformed_job_is_phoenix_error(client, job):
+    responses.post(f"{CP}/patch-plans", json={"jobId": "j1"})
+    responses.get(f"{CP}/jobs/j1", json=job)
+    with pytest.raises(PhoenixError):
+        client.wait_for_patch_plan("a1", sleep=lambda s: None)

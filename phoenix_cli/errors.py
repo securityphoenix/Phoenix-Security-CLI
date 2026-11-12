@@ -71,3 +71,10 @@ def error_code(exc: PhoenixAPIError) -> str | None:
     if isinstance(parsed, dict) and isinstance(parsed.get("error"), str):
         return parsed["error"]
     return None
+
+
+def expect_mapping(reply, what: str) -> dict:
+    """Return ``reply`` if it is a JSON object, else raise ``PhoenixError``."""
+    if not isinstance(reply, dict):
+        raise PhoenixError(f"Unexpected response from Phoenix for {what}")
+    return reply
