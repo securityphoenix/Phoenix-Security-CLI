@@ -14,10 +14,15 @@ inputs and return decoded JSON; token handling, retries, pagination and
 payload construction are internal.
 """
 
+from urllib.parse import urlsplit
+
+from phoenix_cli.errors import PhoenixConfigError
 from phoenix_cli.api.applications import ApplicationsAPI
 from phoenix_cli.api.assets import AssetsAPI
+from phoenix_cli.api.autopatcher import AutopatcherAPI
 from phoenix_cli.api.campaigns import CampaignsAPI
 from phoenix_cli.api.components import ComponentsAPI
+from phoenix_cli.api.copilot import CopilotAPI
 from phoenix_cli.api.findings import FindingsAPI
 from phoenix_cli.api.imports import ImportsAPI
 from phoenix_cli.api.teams import TeamsAPI
@@ -26,8 +31,29 @@ from phoenix_cli.config import Settings, load_settings
 from phoenix_cli.http import Transport
 
 
+_FORBIDDEN_PATH_PARTS = ("..", "//", "\\", "@", "://", "%2e", "%2f", "%5c", "%40")
+
+
+def _check_raw_path(path, base_url):
+    """Refuse any raw path that could leave the base host or the /v1 API."""
+    if not isinstance(path, str) or not path.startswith("/v1/"):
+        raise PhoenixConfigError(
+            f"raw API path must start with '/v1/': {path!r}")
+    low = path.lower()
+    bad = [p for p in _FORBIDDEN_PATH_PARTS if p in low]
+    if bad or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in path):
+        raise PhoenixConfigError(
+            "raw API path must be a plain /v1 path without '..', '//', '@', "
+            f"backslashes, schemes, encoded separators or whitespace: {path!r}")
+    base, target = urlsplit(base_url), urlsplit(base_url + path)
+    if (target.scheme, target.netloc) != (base.scheme, base.netloc):
+        raise PhoenixConfigError(
+            f"raw API path would change the target host: {path!r}")
+
+
 class PhoenixClient(AssetsAPI, FindingsAPI, ImportsAPI, ApplicationsAPI,
-                    ComponentsAPI, TeamsAPI, UsersAPI, CampaignsAPI):
+                    ComponentsAPI, TeamsAPI, UsersAPI, CampaignsAPI,
+                    AutopatcherAPI, CopilotAPI):
 
     def __init__(self, client_id=None, client_secret=None, base_url=None,
                  env=None, config_path=None, timeout=60, verify_tls=True,
@@ -68,6 +94,10 @@ class PhoenixClient(AssetsAPI, FindingsAPI, ImportsAPI, ApplicationsAPI,
 
     def raw_request(self, method, path, params=None, json_body=None):
         """Escape hatch: call any /v1 path directly (still authenticated,
-        retried and paginated-envelope aware via the transport)."""
+        retried and paginated-envelope aware via the transport).
+
+        The path is checked before the bearer token is attached, so it can
+        never send the token to another host."""
+        _check_raw_path(path, self.transport.base_url)
         return self.transport.request(method, path, params=params,
                                       json_body=json_body)

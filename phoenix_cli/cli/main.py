@@ -90,10 +90,13 @@ def _register_commands():
         apps_cmd,
         assets_cmd,
         auth_cmd,
+        autopatcher_cmd,
         campaigns_cmd,
         components_cmd,
+        copilot_cmd,
         findings_cmd,
         import_cmd,
+        login_cmd,
         teams_cmd,
         users_cmd,
     )
@@ -109,6 +112,10 @@ def _register_commands():
     cli.add_command(teams_cmd.teams)
     cli.add_command(users_cmd.users)
     cli.add_command(campaigns_cmd.campaigns)
+    cli.add_command(autopatcher_cmd.autopatcher)
+    cli.add_command(copilot_cmd.copilot)
+    cli.add_command(login_cmd.login)
+    cli.add_command(login_cmd.logout)
 
 
 _register_commands()

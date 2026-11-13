@@ -80,6 +80,21 @@ Environments: `--env prod` (`api.securityphoenix.cloud`), `--env demo`
 (`api.demo.appsecphx.io`), `--env poc1` (`api.poc1.appsecphx.io`), or any
 dedicated-enterprise URL via `--api-base-url https://api.<tenant>.securityphoenix.cloud`.
 
+### Log in as yourself (device login)
+
+Instead of an API key you can log in through the browser. The token is stored
+in your operating system keychain, never in a file, and is never printed.
+
+```bash
+pip install "phoenix-security-cli[keyring]"
+phx login            # prints a link and a code; approve it in the browser
+phx logout           # removes the stored login for this base URL
+```
+
+An API key (flags, environment or `config.ini`) always wins over a stored
+login. When a stored login is rejected, run `phx login` again. Device login is
+available when it is switched on for your organisation.
+
 **Never commit `config.ini` with real credentials** — it is git-ignored here.
 
 ## Quick tour
@@ -140,6 +155,13 @@ phx -o json services list --parent-id <environment-id> \
 phx teams create --name "AppSec" --type SECURITY
 phx teams add-members --name "AppSec" --user alice@example.com --auto-create
 phx users deactivate --email leaver@example.com
+
+# Autopatcher and Copilot patch plans (available when switched on for your organisation)
+phx autopatcher lookup --hostname build-01 --ip 10.0.0.5
+phx autopatcher policy --usage server
+phx autopatcher plan get <planId>
+phx copilot plan --asset-id <assetId> --wait   # a person accepts it in Phoenix, or Phoenix does by policy when every action is auto and automatic acceptance is on
+phx copilot job <jobId>
 
 # Anything the CLI doesn't wrap
 phx api POST /v1/findings --body '{"cves":["CVE-2024-3094"]}'

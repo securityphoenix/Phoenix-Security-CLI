@@ -344,3 +344,53 @@ def test_not_supported_exit_code():
         cli, ["--client-id", "a", "--client-secret", "b", "apps", "delete",
               "some-id"])
     assert result.exit_code == 5
+
+
+# -- raw_request path guard (bearer token must stay on the base host) --------
+
+@pytest.mark.parametrize("path", [
+    ".evil.test/x",                      # host suffix trick
+    "v1/applications",                   # no leading slash
+    "/applications",                     # outside /v1
+    "/v1",                               # not under /v1/
+    "https://evil.test/v1/x",            # scheme
+    "/v1/x://evil.test",                 # scheme inside
+    "//evil.test/v1/x",                  # protocol-relative
+    "/v1//evil.test",                    # double slash
+    "/v1/../admin",                      # traversal
+    "/v1/%2e%2e/admin",                  # encoded traversal
+    "/v1/a%2fb",                         # encoded slash
+    "/v1/a%5cb",                         # encoded backslash
+    "/v1/a@evil.test",                   # userinfo
+    "/v1/a\\b",                          # backslash
+    "/v1/a b",                           # space
+    "/v1/a\tb",                          # tab
+    "/v1/a\nb",                          # newline
+    "/v1/a\x00b",                        # NUL
+    "",
+    None,
+])
+@responses.activate
+def test_raw_request_refuses_unsafe_paths(client, path):
+    from phoenix_cli.errors import PhoenixConfigError
+    with pytest.raises(PhoenixConfigError):
+        client.raw_request("GET", path)
+    assert len(responses.calls) == 0  # no token request, nothing sent
+
+
+@pytest.mark.parametrize("path", [
+    "/v1/applications",
+    "/v1/autopatcher/policy",
+    "/v1/autopatcher/plans/p1",
+    "/v1/autopatcher/assets/a1/findings",
+    "/v1/copilot/jobs/j1",
+])
+def test_raw_request_accepts_v1_paths_on_base_host(client, path):
+    from urllib.parse import urlsplit
+    with responses.RequestsMock() as rsps:
+        _mock_token(rsps)
+        rsps.get(f"{BASE}{path}", json={"ok": True})
+        assert client.raw_request("GET", path) == {"ok": True}
+        sent = rsps.calls[-1].request
+        assert urlsplit(sent.url).netloc == urlsplit(BASE).netloc
+        assert sent.headers["Authorization"] == "Bearer tok"
