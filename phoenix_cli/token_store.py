@@ -27,25 +27,36 @@ _NOT_A_KEYCHAIN = ("keyrings.alt", "keyring.backends.fail",
                    "keyring.backends.null")
 
 
-def ensure_available() -> None:
-    """Raise ``RuntimeError`` unless an operating system keychain can hold a
-    login: the extra is installed and the backend that would take the write
-    is not a file, null or failing backend."""
-    kr = _keyring()
-    if kr is None:
-        raise RuntimeError(_MISSING)
+def _verified_writer(kr):
+    """The one backend that will receive the token, verified to be a keychain.
+
+    keyring's chained backend writes to the first backend that does not raise
+    ``NotImplementedError``, so a later (plaintext) backend can receive the
+    token. The token is therefore written to the verified first backend
+    directly, never through the chain."""
     get_backend = getattr(kr, "get_keyring", None)
     if get_backend is None:
-        return
+        return kr
     backend = get_backend()
     chain = getattr(backend, "backends", None)
-    if chain is not None:  # chained backends: the first one takes the write
+    if chain is not None:
         chain = list(chain)
         if not chain:
             raise RuntimeError(_NO_KEYCHAIN)
         backend = chain[0]
     if type(backend).__module__.startswith(_NOT_A_KEYCHAIN):
         raise RuntimeError(_NO_KEYCHAIN)
+    return backend
+
+
+def ensure_available() -> None:
+    """Raise ``RuntimeError`` unless an operating system keychain can hold a
+    login: the extra is installed and the backend that takes the write is not
+    a file, null or failing backend."""
+    kr = _keyring()
+    if kr is None:
+        raise RuntimeError(_MISSING)
+    _verified_writer(kr)
 
 
 def _key(base_url: str) -> str:
@@ -53,10 +64,12 @@ def _key(base_url: str) -> str:
 
 
 def save_token(base_url: str, token: str, expires_at: int) -> None:
-    ensure_available()
     kr = _keyring()
-    kr.set_password(SERVICE, _key(base_url),
-                    json.dumps({"token": token, "expires_at": int(expires_at)}))
+    if kr is None:
+        raise RuntimeError(_MISSING)
+    _verified_writer(kr).set_password(
+        SERVICE, _key(base_url),
+        json.dumps({"token": token, "expires_at": int(expires_at)}))
 
 
 def load_token(base_url: str) -> tuple[str, int] | None:

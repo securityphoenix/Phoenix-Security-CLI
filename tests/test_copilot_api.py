@@ -114,6 +114,34 @@ def test_wait_for_patch_plan_timeout_counts_request_time(client):
 
 
 @responses.activate
+def test_wait_for_patch_plan_budget_counts_job_creation(client):
+    """A slow job creation uses up the budget: no job poll at all."""
+    now = [0.0]
+
+    def slow_create(request):
+        now[0] += 30  # creation, auth and retries take thirty seconds
+        return 200, {}, '{"jobId": "j1"}'
+
+    responses.add_callback(responses.POST, f"{CP}/patch-plans",
+                           callback=slow_create, content_type="application/json")
+    with pytest.raises(TimeoutError):
+        client.wait_for_patch_plan("a1", timeout_s=10, poll_s=5,
+                                   sleep=lambda s: None, clock=lambda: now[0])
+    assert not [c for c in responses.calls if "/jobs/" in c.request.url]
+
+
+@responses.activate
+def test_caller_headers_cannot_override_authorization(client):
+    responses.get(f"{BASE}/v1/x", json={},
+                  match=[matchers.header_matcher(
+                      {"Authorization": "Bearer tok",
+                       "Content-Type": "application/json", "X-Extra": "1"})])
+    client.transport.request(
+        "GET", "/v1/x",
+        headers={"Authorization": "Bearer evil", "X-Extra": "1"})
+
+
+@responses.activate
 def test_wait_for_patch_plan_failed_job(client):
     responses.post(f"{CP}/patch-plans", json={"jobId": "j1"})
     responses.get(f"{CP}/jobs/j1", json={"state": "FAILED", "error": "boom"})

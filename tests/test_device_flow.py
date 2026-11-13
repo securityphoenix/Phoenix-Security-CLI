@@ -394,8 +394,38 @@ def test_save_token_refuses_a_file_or_null_backend(keyring, backend):
 ])
 def test_save_token_accepts_an_os_keychain(keyring, backend):
     keyring.get_keyring = lambda: backend
+    writer = backend.backends[0] if hasattr(backend, "backends") else backend
+    writer.set_password = keyring.set_password
     token_store.save_token(BASE, "t", int(time.time()) + 60)
     assert token_store.load_token(BASE)[0] == "t"
+
+
+def test_save_token_never_reaches_a_plaintext_fallback(keyring):
+    """keyring's chain falls through on NotImplementedError; the write goes to
+    the verified first backend directly, so it cannot land in a later file."""
+    plaintext = _backend("keyrings.alt.file", "PlaintextKeyring")
+    stored = []
+    plaintext.set_password = lambda s, u, v: stored.append(v)
+
+    def refuse(service, user, value):
+        raise NotImplementedError
+
+    secure = _backend("keyring.backends.macOS")
+    secure.set_password = refuse
+    chain = _Chain(secure, plaintext)
+
+    def chained_set(service, user, value):  # what keyring's ChainerBackend does
+        for b in chain.backends:
+            try:
+                return b.set_password(service, user, value)
+            except NotImplementedError:
+                pass
+
+    chain.set_password = chained_set
+    keyring.get_keyring = lambda: chain
+    with pytest.raises(NotImplementedError):
+        token_store.save_token(BASE, "SECRET-TOK", int(time.time()) + 60)
+    assert stored == []
 
 
 def test_clear_token_reports_a_failed_delete(keyring):

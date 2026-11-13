@@ -107,11 +107,9 @@ class Transport:
         attempt = 0
         while True:
             token = self._ensure_token()
-            request_headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-            }
+            request_headers = {"Content-Type": "application/json"}
             request_headers.update(headers or {})
+            request_headers["Authorization"] = f"Bearer {token}"
             response = self._session.request(
                 method, url, params=params, json=json_body,
                 headers=request_headers, timeout=self.timeout,

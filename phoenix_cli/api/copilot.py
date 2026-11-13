@@ -47,8 +47,11 @@ class CopilotAPI:
         ``timeout_s`` seconds, counted from the start with a monotonic clock so
         the time spent in requests and retries counts too.
         """
-        job_id = self.start_patch_plan(asset_id, str(uuid.uuid4()), stale_copies)
         deadline = clock() + timeout_s
+        job_id = self.start_patch_plan(asset_id, str(uuid.uuid4()), stale_copies)
+        if deadline - clock() <= 0:
+            raise TimeoutError(
+                f"Copilot job {job_id} did not finish within {timeout_s} seconds")
         while True:
             job = expect_mapping(self.get_job(job_id), "the job")
             state = job.get("state")
